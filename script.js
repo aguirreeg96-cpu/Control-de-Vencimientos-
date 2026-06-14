@@ -829,7 +829,11 @@ function renderExpirations() {
   el.innerHTML=
     '<div class="page-header"><div><div class="page-title">Gestión de Vencimientos</div>'+
     '<div class="page-subtitle">'+App.expirations.length+' documentos registrados</div></div>'+
-    '<div class="page-actions"><button class="btn-primary" onclick="addExp()">'+plusIcon()+' Nuevo Vencimiento</button></div></div>'+
+    '<div class="page-actions">'+
+    '<button class="btn-ghost" onclick="downloadTemplate()" title="Descargar plantilla CSV de ejemplo">'+dlIcon()+' Plantilla CSV</button>'+
+    '<button class="btn-ghost" onclick="triggerImportCSV()">'+upIcon()+' Importar CSV</button>'+
+    '<input type="file" id="csv-import-input" accept=".csv" style="display:none" onchange="importCSVFile(this)">'+
+    '<button class="btn-primary" onclick="addExp()">'+plusIcon()+' Nuevo Vencimiento</button></div></div>'+
     '<div class="filter-row">'+
     '<select class="filter-select" onchange="setExpFilter(\'cat\',this.value)">'+
     '<option value="all">Todas las categorías</option>'+
@@ -947,6 +951,225 @@ function delExp(id) {
   dbSave('expirations',App.expirations);
   addHistory('delete','expiration',id,e.type,e.type+' eliminado');
   toast('Vencimiento eliminado','warning'); renderExpirations(); updateBadges();
+}
+
+// ─── CSV IMPORT ──────────────────────────────────────────────
+
+function downloadTemplate() {
+  var hdr = 'tipo,categoria,descripcion,vehiculo,chofer,fecha_emision,fecha_vencimiento,observaciones\r\n';
+  var ex1 = '"Seguro RC","vehiculo","Seguro de Responsabilidad Civil","AB 123 CD","","01/01/2025","31/12/2025",""\r\n';
+  var ex2 = '"Licencia de Conducir","chofer","Licencia categoría D","","Juan Pérez","15/01/2025","15/01/2027","Renovación habitual"\r\n';
+  var ex3 = '"Habilitación Empresa","empresa","Habilitación Municipal","","","01/03/2025","01/03/2026",""\r\n';
+  var note = '"","","","","","","",""\r\n';
+  var noteRow = '"--- CATEGORÍAS VÁLIDAS: vehiculo | chofer | empresa | residuos ---","","","","","","",""\r\n';
+  var csv = '﻿' + hdr + ex1 + ex2 + ex3 + note + noteRow;
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a'); a.href=url; a.download='plantilla-vencimientos.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Plantilla descargada');
+}
+
+function triggerImportCSV() {
+  var inp = document.getElementById('csv-import-input');
+  if (!inp) { toast('Navegá a Vencimientos primero', 'error'); return; }
+  inp.value = '';
+  inp.click();
+}
+
+function parseCSVText(text) {
+  text = text.replace(/^﻿/, '');
+  var lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  var results = [];
+  function parseRow(line) {
+    var row=[], cur='', inQ=false;
+    for(var i=0; i<line.length; i++) {
+      var c=line[i];
+      if(inQ) {
+        if(c==='"') { if(line[i+1]==='"'){cur+='"';i++;} else inQ=false; }
+        else cur+=c;
+      } else {
+        if(c==='"') inQ=true;
+        else if(c===','){row.push(cur);cur='';}
+        else cur+=c;
+      }
+    }
+    row.push(cur);
+    return row;
+  }
+  for(var i=0; i<lines.length; i++) {
+    if(lines[i].trim()) results.push(parseRow(lines[i]));
+  }
+  return results;
+}
+
+function parseDateCSV(s) {
+  if(!s||!s.trim()) return null;
+  s=s.trim();
+  var m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(m) {
+    var d=new Date(Number(m[3]),Number(m[2])-1,Number(m[1]));
+    if(isNaN(d.getTime())||d.getDate()!==Number(m[1])) return null;
+    return toISO(d);
+  }
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    var d2=new Date(s+'T00:00:00');
+    return isNaN(d2.getTime())?null:s;
+  }
+  return null;
+}
+
+function normalizeCat(s) {
+  s=(s||'').trim().toLowerCase();
+  if(s==='vehículo'||s==='vehiculo'||s==='vehicle') return 'vehicle';
+  if(s==='chofer'||s==='conductor'||s==='driver') return 'driver';
+  if(s==='empresa'||s==='company') return 'company';
+  if(s==='residuos'||s==='waste'||s==='peligrosos') return 'waste';
+  return 'vehicle';
+}
+
+function findVehicleByStr(s) {
+  if(!s||!s.trim()) return '';
+  var q=s.trim().toLowerCase().replace(/\s+/g,'');
+  var v=App.vehicles.find(function(x){
+    return (x.patent||'').toLowerCase().replace(/\s+/g,'')=== q;
+  });
+  return v?v.id:null;
+}
+
+function findDriverByStr(s) {
+  if(!s||!s.trim()) return '';
+  var q=s.trim().toLowerCase();
+  var d=App.drivers.find(function(x){
+    return (x.name+' '+x.lastName).toLowerCase()===q ||
+           (x.lastName+' '+x.name).toLowerCase()===q;
+  });
+  return d?d.id:null;
+}
+
+function importCSVFile(input) {
+  var file=input.files[0];
+  if(!file) return;
+  var reader=new FileReader();
+  reader.onload=function(ev){ processImport(ev.target.result); };
+  reader.onerror=function(){ toast('Error al leer el archivo','error'); };
+  reader.readAsText(file,'UTF-8');
+}
+
+function processImport(text) {
+  var rows=parseCSVText(text);
+  if(!rows.length){toast('Archivo vacío','error');return;}
+
+  var header=rows[0].map(function(h){return h.trim().toLowerCase();});
+  var missing=['tipo','fecha_vencimiento'].filter(function(c){return header.indexOf(c)===-1;});
+  if(missing.length) {
+    openModal('Error de importación',
+      '<div style="padding:16px">'+
+      '<p style="color:#ef4444;font-weight:700;margin-bottom:10px">Columnas obligatorias faltantes:</p>'+
+      '<p style="font-family:monospace;background:#fee2e2;padding:8px;border-radius:6px;color:#b91c1c">'+esc(missing.join(', '))+'</p>'+
+      '<p style="color:#64748b;font-size:13px;margin-top:12px">Usá el botón "Plantilla CSV" para descargar el formato correcto.</p>'+
+      '<p style="color:#64748b;font-size:12px;margin-top:6px">Columnas requeridas: <strong>tipo, fecha_vencimiento</strong></p>'+
+      '<p style="color:#64748b;font-size:12px">Opcionales: categoria, descripcion, vehiculo, chofer, fecha_emision, observaciones</p>'+
+      '</div>', null);
+    return;
+  }
+
+  function col(row,name){var idx=header.indexOf(name);return idx>=0?(row[idx]||'').trim():'';}
+
+  var imported=0, omitted=0, errors=[];
+  var dataRows=rows.slice(1).filter(function(r){return r.some(function(c){return c.trim();});});
+
+  dataRows.forEach(function(row,i){
+    var rowNum=i+2;
+    var tipo=col(row,'tipo');
+    var expStr=col(row,'fecha_vencimiento');
+
+    if(!tipo){errors.push('Fila '+rowNum+': campo "tipo" vacío');omitted++;return;}
+    if(!expStr){errors.push('Fila '+rowNum+': campo "fecha_vencimiento" vacío');omitted++;return;}
+
+    var expiryDate=parseDateCSV(expStr);
+    if(!expiryDate){errors.push('Fila '+rowNum+': fecha_vencimiento inválida — "'+expStr+'" (usá DD/MM/AAAA o AAAA-MM-DD)');omitted++;return;}
+
+    var issueStr=col(row,'fecha_emision');
+    var issueDate=issueStr?parseDateCSV(issueStr):toISO(today0());
+    if(issueStr&&!issueDate){
+      errors.push('Fila '+rowNum+': fecha_emision inválida "'+issueStr+'" — se usa hoy');
+      issueDate=toISO(today0());
+    }
+    if(!issueDate) issueDate=toISO(today0());
+
+    var category=normalizeCat(col(row,'categoria'));
+    var vehicleId='', driverId='';
+    var vStr=col(row,'vehiculo'), dStr=col(row,'chofer');
+
+    if(vStr){
+      var vFound=findVehicleByStr(vStr);
+      if(vFound===null) errors.push('Fila '+rowNum+': vehículo "'+vStr+'" no encontrado — se importa sin vehículo');
+      else vehicleId=vFound;
+    }
+    if(dStr){
+      var dFound=findDriverByStr(dStr);
+      if(dFound===null) errors.push('Fila '+rowNum+': chofer "'+dStr+'" no encontrado — se importa sin chofer');
+      else driverId=dFound;
+    }
+
+    var dup=App.expirations.find(function(e){
+      return e.type.toLowerCase()===tipo.toLowerCase() &&
+             e.vehicleId===vehicleId && e.driverId===driverId &&
+             e.expiryDate===expiryDate;
+    });
+    if(dup){errors.push('Fila '+rowNum+': duplicado — "'+tipo+'" ya existe con la misma entidad y fecha');omitted++;return;}
+
+    App.expirations.push({
+      id:uid(), type:tipo, category:category,
+      vehicleId:vehicleId, driverId:driverId,
+      issueDate:issueDate, expiryDate:expiryDate,
+      description:col(row,'descripcion'),
+      observations:col(row,'observaciones')
+    });
+    imported++;
+  });
+
+  if(imported>0){
+    dbSave('expirations',App.expirations);
+    addHistory('create','expiration','bulk','Importación CSV',
+      'Importación masiva: '+imported+' vencimientos importados');
+  }
+
+  var total=dataRows.length;
+  var summaryHtml=
+    '<div style="padding:4px 0">'+
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">'+
+    '<div style="background:#dcfce7;border-radius:10px;padding:16px;text-align:center">'+
+      '<div style="font-size:34px;font-weight:800;color:#15803d">'+imported+'</div>'+
+      '<div style="font-size:12px;color:#166534;font-weight:600;margin-top:4px">Importados</div></div>'+
+    '<div style="background:#fee2e2;border-radius:10px;padding:16px;text-align:center">'+
+      '<div style="font-size:34px;font-weight:800;color:#b91c1c">'+omitted+'</div>'+
+      '<div style="font-size:12px;color:#991b1b;font-weight:600;margin-top:4px">Omitidos</div></div>'+
+    '<div style="background:#f1f5f9;border-radius:10px;padding:16px;text-align:center">'+
+      '<div style="font-size:34px;font-weight:800;color:#475569">'+total+'</div>'+
+      '<div style="font-size:12px;color:#64748b;font-weight:600;margin-top:4px">Filas procesadas</div></div>'+
+    '</div>';
+
+  if(errors.length){
+    summaryHtml+=
+      '<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:12px;margin-bottom:14px">'+
+      '<div style="font-size:12px;font-weight:700;color:#854d0e;margin-bottom:6px">Avisos ('+errors.length+')</div>'+
+      '<div style="max-height:150px;overflow-y:auto"><ul style="margin:0;padding-left:18px;font-size:12px;color:#713f12">'+
+      errors.slice(0,25).map(function(e){return '<li style="margin-bottom:3px">'+esc(e)+'</li>';}).join('')+
+      (errors.length>25?'<li style="color:#94a3b8">...y '+(errors.length-25)+' avisos más</li>':'')+
+      '</ul></div></div>';
+  }
+
+  summaryHtml+=(imported>0
+    ?'<p style="font-size:13px;color:#15803d;font-weight:600">✓ Los vencimientos ya están disponibles en la tabla y el dashboard.</p>'
+    :'<p style="font-size:13px;color:#ef4444;font-weight:600">No se importó ningún registro. Revisá el archivo y los avisos.</p>')+'</div>';
+
+  // Update data BEFORE showing modal so table is ready
+  if(imported>0){renderExpirations();updateBadges();}
+  openModal('Resultado de Importación',summaryHtml,null);
+  toast(imported>0?imported+' registros importados':'Sin registros importados',imported>0?'success':'warning');
 }
 
 // ─── HAZARDOUS ───────────────────────────────────────────────
@@ -1253,6 +1476,12 @@ function plusIcon() {
 function renewIcon() {
   return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 7A5.5 5.5 0 0 1 12 4M12.5 7A5.5 5.5 0 0 1 2 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 4h2V2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 }
+function dlIcon() {
+  return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8M4.5 6.5L7 9l2.5-2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 11.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+}
+function upIcon() {
+  return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 9V1M4.5 3.5L7 1l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 11.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+}
 
 // ─── INIT ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
@@ -1331,5 +1560,8 @@ window.delHaz       = delHaz;
 window.calNav       = calNav;
 window.buildReport  = buildReport;
 window.exportCSV    = exportCSV;
-window.filterHistory= filterHistory;
-window.closeSearch  = closeSearch;
+window.filterHistory    = filterHistory;
+window.closeSearch      = closeSearch;
+window.downloadTemplate = downloadTemplate;
+window.triggerImportCSV = triggerImportCSV;
+window.importCSVFile    = importCSVFile;
