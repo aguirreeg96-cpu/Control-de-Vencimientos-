@@ -3,7 +3,7 @@
    ============================================================ */
 
 // ─── CONSTANTS ───────────────────────────────────────────────
-const KEY = 'lcp2_';
+const KEY = 'lcp3_';
 const CATS = { vehicle:'Vehículo', driver:'Chofer', company:'Empresa', waste:'Residuos' };
 
 // ─── STATE ───────────────────────────────────────────────────
@@ -155,131 +155,6 @@ function getAllAlerts() {
   var order={expired:0,critical:1,warning:2,caution:3};
   alerts.sort(function(a,b){ return (order[a.status]||9)-(order[b.status]||9)||a.days-b.days; });
   return alerts;
-}
-
-// ─── DEMO DATA ───────────────────────────────────────────────
-function generateDemoData() {
-  if(dbGet('initialized2',false)) return;
-
-  var driverData=[
-    ['Juan','Pérez','28456789','D'],['Carlos','González','30123456','D'],['Roberto','Martínez','25789012','E'],
-    ['Diego','Rodríguez','33345678','C'],['Miguel','Fernández','27901234','D'],['Pablo','López','31567890','E'],
-    ['Alejandro','García','24123456','D'],['Sebastián','Torres','32789012','C'],['Marcelo','Ramírez','26345678','D'],
-    ['Nicolás','Herrera','34901234','E'],['Gustavo','Ruiz','23567890','C'],['Fernando','Sánchez','35123456','D'],
-    ['Eduardo','Morales','22789012','D'],['Adrián','Delgado','36345678','E'],['Horacio','Vargas','21901234','C']
-  ];
-  App.drivers=driverData.map(function(d,i){
-    return {id:'dr'+i,name:d[0],lastName:d[1],dni:d[2],licenseCategory:d[3],
-      licenseNumber:'LIC-'+String(100000+i*7777).padStart(7,'0'),notes:''};
-  });
-
-  var vData=[
-    ['AB 123 CD','Mercedes-Benz','Actros 2651',2019],['BC 456 DE','Scania','R420',2020],
-    ['CD 789 EF','Volvo','FH 460',2018],['DE 012 FG','Ford','Cargo 1722',2017],
-    ['EF 345 GH','Renault','Master',2021],['FG 678 HI','Iveco','Stralis',2019],
-    ['GH 901 IJ','MAN','TGX 26.440',2022],['HI 234 JK','DAF','XF 105',2018],
-    ['IJ 567 KL','Scania','G360',2020],['JK 890 LM','Mercedes-Benz','Sprinter',2021],
-    ['KL 123 MN','Ford','Transit',2022],['LM 456 NO','Volkswagen','Constellation',2019],
-    ['MN 789 OP','Fiat','Ducato',2020],['NO 012 PQ','Toyota','Hilux',2021],
-    ['OP 345 QR','Chevrolet','S10',2022]
-  ];
-  App.vehicles=vData.map(function(v,i){
-    return {id:'ve'+i,patent:v[0],brand:v[1],model:v[2],year:v[3],
-      driverId:App.drivers[i]?App.drivers[i].id:'',notes:''};
-  });
-
-  // 50 expirations with varied dates
-  var expDefs=[
-    // EXPIRED
-    {t:'Seguro RC',c:'vehicle',vi:'ve0',di:'',ii:relDate(-400),ei:relDate(-30)},
-    {t:'VTV / RTO',c:'vehicle',vi:'ve1',di:'',ii:relDate(-380),ei:relDate(-15)},
-    {t:'Matafuegos',c:'vehicle',vi:'ve2',di:'',ii:relDate(-370),ei:relDate(-5)},
-    {t:'Licencia de Conducir',c:'driver',vi:'',di:'dr0',ii:relDate(-1200),ei:relDate(-10)},
-    {t:'Psicofísico',c:'driver',vi:'',di:'dr1',ii:relDate(-370),ei:relDate(-20)},
-    {t:'ART',c:'driver',vi:'',di:'dr2',ii:relDate(-380),ei:relDate(-8)},
-    {t:'Habilitación Empresa',c:'company',vi:'',di:'',ii:relDate(-400),ei:relDate(-60)},
-    {t:'Póliza General',c:'company',vi:'',di:'',ii:relDate(-400),ei:relDate(-45)},
-    {t:'Habilitación Ambiental',c:'waste',vi:'',di:'',ii:relDate(-400),ei:relDate(-90)},
-    {t:'Verificación Técnica',c:'vehicle',vi:'ve3',di:'',ii:relDate(-400),ei:relDate(-3)},
-    {t:'Curso Cargas Peligrosas',c:'driver',vi:'',di:'dr3',ii:relDate(-400),ei:relDate(-25)},
-    {t:'Permiso de Transporte',c:'waste',vi:'',di:'',ii:relDate(-400),ei:relDate(-12)},
-    // CRITICAL (0-15d)
-    {t:'Seguro RC',c:'vehicle',vi:'ve4',di:'',ii:relDate(-365),ei:relDate(5)},
-    {t:'VTV / RTO',c:'vehicle',vi:'ve5',di:'',ii:relDate(-365),ei:relDate(10)},
-    {t:'Psicofísico',c:'driver',vi:'',di:'dr4',ii:relDate(-365),ei:relDate(7)},
-    {t:'ART',c:'driver',vi:'',di:'dr5',ii:relDate(-365),ei:relDate(3)},
-    {t:'Licencia de Conducir',c:'driver',vi:'',di:'dr6',ii:relDate(-1825),ei:relDate(12)},
-    {t:'Habilitación Municipal',c:'vehicle',vi:'ve6',di:'',ii:relDate(-365),ei:relDate(14)},
-    {t:'Tacógrafo',c:'vehicle',vi:'ve7',di:'',ii:relDate(-365),ei:relDate(8)},
-    {t:'Póliza Ambiental',c:'waste',vi:'',di:'',ii:relDate(-365),ei:relDate(6)},
-    // WARNING (16-30d)
-    {t:'Seguro RC',c:'vehicle',vi:'ve8',di:'',ii:relDate(-335),ei:relDate(20)},
-    {t:'VTV / RTO',c:'vehicle',vi:'ve9',di:'',ii:relDate(-335),ei:relDate(25)},
-    {t:'Matafuegos',c:'vehicle',vi:'ve10',di:'',ii:relDate(-335),ei:relDate(28)},
-    {t:'Psicofísico',c:'driver',vi:'',di:'dr7',ii:relDate(-335),ei:relDate(22)},
-    {t:'ART',c:'driver',vi:'',di:'dr8',ii:relDate(-335),ei:relDate(17)},
-    {t:'Curso Cargas Peligrosas',c:'driver',vi:'',di:'dr9',ii:relDate(-335),ei:relDate(29)},
-    {t:'Verificación Técnica',c:'vehicle',vi:'ve11',di:'',ii:relDate(-335),ei:relDate(23)},
-    {t:'Habilitación SENASA',c:'company',vi:'',di:'',ii:relDate(-335),ei:relDate(30)},
-    {t:'Contrato Cliente',c:'waste',vi:'',di:'',ii:relDate(-335),ei:relDate(18)},
-    {t:'Habilitación Municipal',c:'vehicle',vi:'ve12',di:'',ii:relDate(-335),ei:relDate(26)},
-    // CAUTION (31-60d)
-    {t:'Seguro RC',c:'vehicle',vi:'ve13',di:'',ii:relDate(-305),ei:relDate(40)},
-    {t:'VTV / RTO',c:'vehicle',vi:'ve14',di:'',ii:relDate(-305),ei:relDate(55)},
-    {t:'Licencia de Conducir',c:'driver',vi:'',di:'dr10',ii:relDate(-1700),ei:relDate(45)},
-    {t:'Psicofísico',c:'driver',vi:'',di:'dr11',ii:relDate(-305),ei:relDate(35)},
-    {t:'ART',c:'driver',vi:'',di:'dr12',ii:relDate(-305),ei:relDate(58)},
-    {t:'Certificado Regulatorio',c:'waste',vi:'',di:'',ii:relDate(-305),ei:relDate(42)},
-    {t:'Registro Transportista',c:'company',vi:'',di:'',ii:relDate(-305),ei:relDate(50)},
-    {t:'Matafuegos',c:'vehicle',vi:'ve0',di:'',ii:relDate(-305),ei:relDate(38)},
-    {t:'Examen Médico',c:'driver',vi:'',di:'dr13',ii:relDate(-305),ei:relDate(48)},
-    {t:'Tacógrafo',c:'vehicle',vi:'ve1',di:'',ii:relDate(-305),ei:relDate(60)},
-    // OK (61+d)
-    {t:'Seguro RC',c:'vehicle',vi:'ve2',di:'',ii:relDate(-100),ei:relDate(90)},
-    {t:'VTV / RTO',c:'vehicle',vi:'ve3',di:'',ii:relDate(-100),ei:relDate(180)},
-    {t:'Licencia de Conducir',c:'driver',vi:'',di:'dr14',ii:relDate(-1000),ei:relDate(365)},
-    {t:'Psicofísico',c:'driver',vi:'',di:'dr0',ii:relDate(-100),ei:relDate(265)},
-    {t:'ART',c:'driver',vi:'',di:'dr1',ii:relDate(-100),ei:relDate(270)},
-    {t:'Habilitación Empresa',c:'company',vi:'',di:'',ii:relDate(-100),ei:relDate(265)},
-    {t:'Póliza General',c:'company',vi:'',di:'',ii:relDate(-100),ei:relDate(330)},
-    {t:'Habilitación Ambiental',c:'waste',vi:'',di:'',ii:relDate(-100),ei:relDate(245)},
-    {t:'Matafuegos',c:'vehicle',vi:'ve4',di:'',ii:relDate(-100),ei:relDate(160)},
-    {t:'Certificado Regulatorio',c:'waste',vi:'',di:'',ii:relDate(-100),ei:relDate(300)}
-  ];
-  App.expirations=expDefs.map(function(e,i){
-    return {id:'ex'+i,type:e.t,category:e.c,vehicleId:e.vi,driverId:e.di,
-      issueDate:e.ii,expiryDate:e.ei,description:'',observations:''};
-  });
-
-  App.hazardous=[
-    {id:'hz0',type:'Habilitación Ambiental',entityName:'LogiCorp S.A.',permitNumber:'HA-2024-001',issuingAuthority:'Min. Ambiente',issueDate:relDate(-400),expiryDate:relDate(-90),observations:'Renovación en trámite'},
-    {id:'hz1',type:'Permiso de Transporte',entityName:'LogiCorp S.A.',permitNumber:'PT-2024-002',issuingAuthority:'Sec. Transporte',issueDate:relDate(-365),expiryDate:relDate(5),observations:''},
-    {id:'hz2',type:'Póliza Ambiental',entityName:'LogiCorp S.A.',permitNumber:'POL-2024-003',issuingAuthority:'Mapfre Argentina',issueDate:relDate(-300),expiryDate:relDate(65),observations:''},
-    {id:'hz3',type:'Contrato de Cliente',entityName:'Petroquímica del Sur',permitNumber:'CC-2024-004',issuingAuthority:'Petroquímica S.A.',issueDate:relDate(-200),expiryDate:relDate(165),observations:'Contrato marco anual'},
-    {id:'hz4',type:'Certificado Regulatorio',entityName:'LogiCorp S.A.',permitNumber:'CR-2024-005',issuingAuthority:'OPDS',issueDate:relDate(-100),expiryDate:relDate(265),observations:''},
-    {id:'hz5',type:'Manifiesto Residuos',entityName:'Planta Norte',permitNumber:'MR-2024-006',issuingAuthority:'Municipalidad',issueDate:relDate(-50),expiryDate:relDate(315),observations:''},
-    {id:'hz6',type:'Habilitación Ambiental',entityName:'Sucursal Rosario',permitNumber:'HA-2024-007',issuingAuthority:'Min. Ambiente Pcia.',issueDate:relDate(-365),expiryDate:relDate(25),observations:''},
-    {id:'hz7',type:'Permiso de Transporte',entityName:'LogiCorp Norte',permitNumber:'PT-2024-008',issuingAuthority:'Sec. Transporte',issueDate:relDate(-200),expiryDate:relDate(160),observations:''}
-  ];
-
-  var histDesc=[
-    'Vehículo AB 123 CD registrado','Chofer Juan Pérez incorporado','VTV cargado — vehículo BC 456 DE',
-    'Seguro RC renovado','Psicofísico actualizado — dr. Carlos González','ART vigente cargada',
-    'Habilitación empresa actualizada','Matafuegos vehículo CD 789 EF','Licencia renovada — Diego Rodríguez',
-    'Póliza ambiental registrada','Vehículo DE 012 FG incorporado','Chofer Roberto Martínez actualizado',
-    'VTV renovada — vehículo EF 345 GH','ART renovada','Tacógrafo habilitado',
-    'Habilitación SENASA actualizada','Permiso transporte residuos','Certificado regulatorio cargado',
-    'Examen médico laboral registrado','Contrato cliente actualizado'
-  ];
-  var hActions=['create','create','create','renew','update','create','update','create','renew','create','create','update','renew','renew','create','update','create','create','create','update'];
-  App.history=histDesc.map(function(d,i){
-    return {id:uid(),action:hActions[i]||'create',entityType:'expiration',entityId:'',
-      entityName:d.split(' ').slice(0,3).join(' '),description:d,
-      timestamp:new Date(Date.now()-(i*2+1)*86400000).toISOString()};
-  });
-
-  saveAll();
-  dbSave('initialized2',true);
 }
 
 // ─── NAVIGATION ──────────────────────────────────────────────
@@ -1485,9 +1360,6 @@ function upIcon() {
 
 // ─── INIT ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
-  loadAll();
-  generateDemoData();
-  // Reload after potential demo data generation
   loadAll();
 
   // Nav links
