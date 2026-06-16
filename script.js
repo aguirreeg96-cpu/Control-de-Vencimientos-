@@ -1215,7 +1215,20 @@ function renderReports() {
     '<svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M2 9v4h11V9M7.5 1.5V9M5 7l2.5 2.5L10 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'+
     ' Exportar Excel</button>'+
     '</div>'+
-    '<div id="rep-preview"></div></div>';
+    '<div id="rep-preview"></div></div>'+
+
+    '<div class="report-section" style="margin-top:20px">'+
+    '<div class="section-title" style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:10px">Backup de Datos</div>'+
+    '<p style="color:#64748b;font-size:13px;margin-bottom:14px">'+
+    'Para llevar tus datos a otra PC: exportá el backup, copiá el archivo (USB, correo, Drive) y restauralo en la otra computadora.</p>'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'+
+    '<button class="btn-primary" onclick="exportBackup()">'+dlIcon()+' Exportar Backup</button>'+
+    '<button class="btn-ghost" onclick="triggerImportBackup()">'+upIcon()+' Restaurar Backup</button>'+
+    '<input type="file" id="backup-import-input" accept=".json" style="display:none" onchange="importBackup(this)">'+
+    '</div>'+
+    '<p style="color:#94a3b8;font-size:12px;margin-top:10px">'+
+    'El backup incluye todos tus vehículos, choferes, vencimientos, residuos e historial. El archivo es de tipo <strong>.json</strong> y solo lo lee esta aplicación.</p>'+
+    '</div>';
   buildReport();
 }
 
@@ -1268,6 +1281,69 @@ function exportCSV(fmt) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
   toast('Reporte exportado ('+data.length+' registros)');
+}
+
+// ─── BACKUP ──────────────────────────────────────────────────
+
+function exportBackup() {
+  var backup = {
+    version: '1',
+    app: 'LOGICONTROL PRO',
+    exportedAt: new Date().toISOString(),
+    vehicles: App.vehicles,
+    drivers: App.drivers,
+    expirations: App.expirations,
+    hazardous: App.hazardous,
+    history: App.history
+  };
+  var json = JSON.stringify(backup, null, 2);
+  var blob = new Blob([json], {type:'application/json;charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'logicontrol-backup-' + toISO(today0()) + '.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Backup exportado — ' + App.expirations.length + ' vencimientos, ' + App.vehicles.length + ' vehículos');
+}
+
+function triggerImportBackup() {
+  var inp = document.getElementById('backup-import-input');
+  if (!inp) return;
+  inp.value = '';
+  inp.click();
+}
+
+function importBackup(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var data;
+    try { data = JSON.parse(ev.target.result); } catch(e) {
+      toast('El archivo no es un backup válido', 'error'); return;
+    }
+    if (!Array.isArray(data.vehicles) || !Array.isArray(data.expirations)) {
+      toast('Archivo de backup inválido o corrupto', 'error'); return;
+    }
+    var msg = 'Restaurar backup del ' + fmtDate(data.exportedAt ? data.exportedAt.split('T')[0] : '') + '?\n\n' +
+      '• ' + (data.vehicles||[]).length + ' vehículos\n' +
+      '• ' + (data.drivers||[]).length + ' choferes\n' +
+      '• ' + (data.expirations||[]).length + ' vencimientos\n\n' +
+      'ATENCIÓN: se reemplazarán todos los datos actuales.';
+    if (!confirm(msg)) return;
+    App.vehicles    = data.vehicles    || [];
+    App.drivers     = data.drivers     || [];
+    App.expirations = data.expirations || [];
+    App.hazardous   = data.hazardous   || [];
+    App.history     = data.history     || [];
+    saveAll();
+    renderView(App.view);
+    updateBadges();
+    toast('Backup restaurado — ' + App.expirations.length + ' vencimientos cargados');
+  };
+  reader.onerror = function() { toast('Error al leer el archivo', 'error'); };
+  reader.readAsText(file, 'UTF-8');
 }
 
 // ─── HISTORY ─────────────────────────────────────────────────
@@ -1434,6 +1510,9 @@ window.buildReport  = buildReport;
 window.exportCSV    = exportCSV;
 window.filterHistory    = filterHistory;
 window.closeSearch      = closeSearch;
-window.downloadTemplate = downloadTemplate;
-window.triggerImportCSV = triggerImportCSV;
-window.importCSVFile    = importCSVFile;
+window.downloadTemplate  = downloadTemplate;
+window.triggerImportCSV  = triggerImportCSV;
+window.importCSVFile     = importCSVFile;
+window.exportBackup      = exportBackup;
+window.triggerImportBackup = triggerImportBackup;
+window.importBackup      = importBackup;
