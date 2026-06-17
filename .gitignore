@@ -1,0 +1,17 @@
+# Variables de entorno — NUNCA subir a git
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/.env.local
+
+# Dependencias
+node_modules/
+backend/node_modules/
+
+# Build
+backend/dist/
+
+# OS
+.DS_Store
+Thumbs.db

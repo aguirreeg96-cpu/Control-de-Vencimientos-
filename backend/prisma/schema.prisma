@@ -1,0 +1,21 @@
+// LOGICONTROL PRO — Prisma Schema
+// Las tablas definitivas (empresas, usuarios, vehículos, choferes, vencimientos)
+// se crearán en la siguiente etapa del desarrollo.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Próximas entidades a definir:
+// - Company (empresa)
+// - User (usuario vinculado a una empresa)
+// - Vehicle (vehículo)
+// - Driver (chofer)
+// - Expiration (vencimiento / documento)
+// - HazardousRecord (registro de residuos peligrosos)
+// - HistoryLog (historial de acciones)
