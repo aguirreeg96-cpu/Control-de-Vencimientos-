@@ -1,0 +1,252 @@
+// ============================================================
+//  LOGICONTROL PRO — Prisma Schema
+//  Etapa 2: Schema inicial de negocio (sin Users ni Auth)
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────
+
+/// Categoría de un vencimiento, refleja el CATS del frontend
+enum ExpirationCategory {
+  VEHICLE // vehículo
+  DRIVER // chofer
+  COMPANY // empresa (ni vehículo ni chofer)
+  WASTE // residuos peligrosos
+}
+
+/// Acciones registrables en el historial de auditoría
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  RENEW
+}
+
+/// Roles de usuario en el sistema
+enum UserRole {
+  SUPER_ADMIN // acceso total, configura la empresa
+  COMPANY_ADMIN // administrador de una empresa
+  USER // usuario operativo estándar
+}
+
+// ─── COMPANY ──────────────────────────────────────────────────
+
+/// Empresa propietaria de los datos.
+/// Todas las entidades de negocio tienen companyId para aislamiento multiempresa.
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  taxId     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicles           Vehicle[]
+  drivers            Driver[]
+  expirations        Expiration[]
+  hazardousDocuments HazardousDocument[]
+  auditLogs          AuditLog[]
+  users              User[]
+
+  @@map("companies")
+}
+
+// ─── DRIVER ───────────────────────────────────────────────────
+
+/// Chofer / conductor. El DNI es único dentro de una empresa.
+model Driver {
+  id              String   @id @default(uuid())
+  companyId       String
+  name            String
+  lastName        String
+  dni             String
+  licenseCategory String?
+  licenseNumber   String?
+  notes           String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  vehicles    Vehicle[]
+  expirations Expiration[]
+
+  /// DNI único por empresa (no globalmente)
+  @@unique([companyId, dni])
+  @@index([companyId])
+  @@index([dni])
+  @@index([lastName])
+  @@map("drivers")
+}
+
+// ─── VEHICLE ──────────────────────────────────────────────────
+
+/// Vehículo de la flota. La patente es única dentro de una empresa.
+model Vehicle {
+  id        String   @id @default(uuid())
+  companyId String
+  patent    String
+  brand     String
+  model     String
+  year      Int?
+  driverId  String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  /// Si el Driver se elimina, el campo driverId queda en NULL (el vehículo subsiste)
+  driver      Driver?      @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  expirations Expiration[]
+
+  /// Patente única por empresa (no globalmente)
+  @@unique([companyId, patent])
+  @@index([companyId])
+  @@index([patent])
+  @@index([driverId])
+  @@map("vehicles")
+}
+
+// ─── EXPIRATION ───────────────────────────────────────────────
+
+/// Documento / vencimiento. Puede pertenecer a un vehículo, a un chofer,
+/// o solo a la empresa (vehicleId y driverId ambos NULL).
+/// El estado (vencido / vigente / próximo) se calcula desde expiryDate, no se persiste.
+model Expiration {
+  id           String             @id @default(uuid())
+  companyId    String
+  type         String
+  category     ExpirationCategory
+  vehicleId    String?
+  driverId     String?
+  issueDate    DateTime?
+  expiryDate   DateTime
+  description  String?
+  observations String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  company Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  /// Si el Vehicle se elimina, vehicleId queda NULL (el vencimiento subsiste)
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  /// Si el Driver se elimina, driverId queda NULL (el vencimiento subsiste)
+  driver  Driver?  @relation(fields: [driverId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([expiryDate])
+  @@index([category])
+  @@index([vehicleId])
+  @@index([driverId])
+  @@index([companyId, expiryDate])
+  @@map("expirations")
+}
+
+// ─── HAZARDOUS DOCUMENT ───────────────────────────────────────
+
+/// Documentación de residuos peligrosos y habilitaciones ambientales.
+/// No vinculada directamente a vehículos ni choferes, sino a la empresa.
+model HazardousDocument {
+  id               String    @id @default(uuid())
+  companyId        String
+  type             String
+  entityName       String
+  permitNumber     String?
+  issuingAuthority String?
+  issueDate        DateTime?
+  expiryDate       DateTime
+  observations     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@index([expiryDate])
+  @@index([type])
+  @@index([permitNumber])
+  @@index([companyId, expiryDate])
+  @@map("hazardous_documents")
+}
+
+// ─── USER ─────────────────────────────────────────────────────
+
+/// Usuario del sistema vinculado a una empresa.
+/// email se normaliza siempre en minúsculas.
+/// passwordHash nunca se expone en respuestas de la API.
+model User {
+  id           String    @id @default(uuid())
+  companyId    String
+  firstName    String
+  lastName     String
+  email        String    @unique
+  passwordHash String
+  role         UserRole  @default(USER)
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  refreshTokens RefreshToken[]
+
+  @@index([companyId])
+  @@index([email])
+  @@index([role])
+  @@index([active])
+  @@map("users")
+}
+
+// ─── REFRESH TOKEN ────────────────────────────────────────────
+
+/// Tokens de refresco almacenados como hash (nunca en texto plano).
+/// Se revocan al usarse (rotación) o al cerrar sesión.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  /// Si el User se elimina, sus refresh tokens también se eliminan
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("refresh_tokens")
+}
+
+// ─── AUDIT LOG ────────────────────────────────────────────────
+
+/// Historial inmutable de acciones sobre entidades.
+/// No tiene updatedAt porque los registros no se modifican.
+model AuditLog {
+  id          String      @id @default(uuid())
+  companyId   String
+  action      AuditAction
+  entityType  String
+  entityId    String?
+  entityName  String?
+  description String
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@index([createdAt])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([companyId, createdAt])
+  @@map("audit_logs")
+}
