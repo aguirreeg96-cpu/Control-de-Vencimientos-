@@ -1,8 +1,11 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExpirationCategory, UserRole } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { PrismaService } from '../prisma/prisma.service';
+import { QueryExpirationDto } from './dto/query-expiration.dto';
 import { ExpirationsService } from './expirations.service';
 
 const COMPANY_ID = 'company-uuid';
@@ -161,5 +164,74 @@ describe('ExpirationsService', () => {
     expect(result.expired).toBe(1);
     expect(result.expiringSoon).toBe(1);
     expect(result.valid).toBe(1);
+  });
+
+  // ── 10. findAll con limit=100 y page=1 ─────────────────────
+  it('findAll: acepta limit=100 y page=1 (máximo permitido)', async () => {
+    (prisma.expiration.findMany as jest.Mock).mockResolvedValue([makeExpiration()]);
+    (prisma.expiration.count as jest.Mock).mockResolvedValue(1);
+
+    const result = await service.findAll({ limit: 100, page: 1 }, adminUser);
+    expect(result.limit).toBe(100);
+    expect(result.page).toBe(1);
+    expect(result.data).toHaveLength(1);
+  });
+
+  // ── 11. findAll filtra por companyId ────────────────────────
+  it('findAll: filtra siempre por companyId del JWT', async () => {
+    (prisma.expiration.findMany as jest.Mock).mockResolvedValue([]);
+    (prisma.expiration.count as jest.Mock).mockResolvedValue(0);
+
+    await service.findAll({ limit: 100 }, adminUser);
+
+    expect(prisma.expiration.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ companyId: COMPANY_ID }) }),
+    );
+  });
+});
+
+describe('QueryExpirationDto — paginación', () => {
+  async function valid(plain: Record<string, unknown>) {
+    const dto = plainToInstance(QueryExpirationDto, plain);
+    const errors = await validate(dto);
+    return errors;
+  }
+
+  it('limit=100 como número es válido', async () => {
+    const errors = await valid({ limit: 100 });
+    expect(errors).toHaveLength(0);
+  });
+
+  it('page=1 como número es válido', async () => {
+    const errors = await valid({ page: 1 });
+    expect(errors).toHaveLength(0);
+  });
+
+  it('limit="100" como string se transforma a número y es válido', async () => {
+    const errors = await valid({ limit: '100' });
+    expect(errors).toHaveLength(0);
+  });
+
+  it('page="1" como string se transforma a número y es válido', async () => {
+    const errors = await valid({ page: '1' });
+    expect(errors).toHaveLength(0);
+  });
+
+  it('limit=200 excede @Max(100) y es inválido', async () => {
+    const errors = await valid({ limit: 200 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints).toHaveProperty('max');
+  });
+
+  it('limit=0 viola @Min(1) y es inválido', async () => {
+    const errors = await valid({ limit: 0 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints).toHaveProperty('min');
+  });
+
+  it('page=0 viola @Min(1) y es inválido', async () => {
+    const errors = await valid({ page: 0 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints).toHaveProperty('min');
   });
 });

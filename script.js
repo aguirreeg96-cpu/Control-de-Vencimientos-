@@ -42,9 +42,9 @@ function loadApiData() {
   return Promise.allSettled([
     apiJson('/vehicles?limit=100'),
     apiJson('/drivers?limit=100'),
-    apiJson('/expirations?limit=200'),
-    apiJson('/hazardous-documents?limit=200'),
-    apiJson('/audit-logs?limit=200')
+    apiJson('/expirations?limit=100'),
+    apiJson('/hazardous-documents?limit=100'),
+    apiJson('/audit-logs?limit=100')
   ]).then(function(results) {
     if(results[0].status==='fulfilled') App.vehicles = results[0].value.data || [];
     else toast('Error al cargar vehículos','error');
@@ -1144,7 +1144,7 @@ function processImport(text) {
 
     function next(i) {
       if(i>=toCreate.length) {
-        return apiJson('/expirations?limit=200').then(function(resp){
+        return apiJson('/expirations?limit=100').then(function(resp){
           App.expirations=(resp.data||[]).map(normalizeExpiration);
           renderExpirations(); updateBadges();
           var summaryHtml='<div style="padding:4px">'+

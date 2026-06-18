@@ -1,8 +1,11 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { UserRole } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { PrismaService } from '../prisma/prisma.service';
+import { QueryHazardousDocumentDto } from './dto/query-hazardous-document.dto';
 import { HazardousDocumentsService } from './hazardous-documents.service';
 
 const COMPANY_ID = 'company-uuid';
@@ -128,5 +131,58 @@ describe('HazardousDocumentsService', () => {
     (prisma.hazardousDocument.findUnique as jest.Mock).mockResolvedValue(makeDoc({ companyId: OTHER_COMPANY_ID }));
 
     await expect(service.findOne(DOC_ID, adminUser)).rejects.toThrow(NotFoundException);
+  });
+
+  // ── Extra: findAll con limit=100 y page=1 ──────────────────
+  it('findAll: acepta limit=100 y page=1 (máximo permitido)', async () => {
+    (prisma.hazardousDocument.findMany as jest.Mock).mockResolvedValue([makeDoc()]);
+    (prisma.hazardousDocument.count as jest.Mock).mockResolvedValue(1);
+
+    const result = await service.findAll({ limit: 100, page: 1 }, adminUser);
+    expect(result.limit).toBe(100);
+    expect(result.page).toBe(1);
+    expect(result.data).toHaveLength(1);
+  });
+});
+
+describe('QueryHazardousDocumentDto — paginación', () => {
+  async function valid(plain: Record<string, unknown>) {
+    const dto = plainToInstance(QueryHazardousDocumentDto, plain);
+    const errors = await validate(dto);
+    return errors;
+  }
+
+  it('limit=100 como número es válido', async () => {
+    expect(await valid({ limit: 100 })).toHaveLength(0);
+  });
+
+  it('page=1 como número es válido', async () => {
+    expect(await valid({ page: 1 })).toHaveLength(0);
+  });
+
+  it('limit="100" como string se transforma y es válido', async () => {
+    expect(await valid({ limit: '100' })).toHaveLength(0);
+  });
+
+  it('page="1" como string se transforma y es válido', async () => {
+    expect(await valid({ page: '1' })).toHaveLength(0);
+  });
+
+  it('limit=200 excede @Max(100) y es inválido', async () => {
+    const errors = await valid({ limit: 200 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints).toHaveProperty('max');
+  });
+
+  it('limit=0 viola @Min(1) y es inválido', async () => {
+    const errors = await valid({ limit: 0 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints).toHaveProperty('min');
+  });
+
+  it('page=0 viola @Min(1) y es inválido', async () => {
+    const errors = await valid({ page: 0 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints).toHaveProperty('min');
   });
 });

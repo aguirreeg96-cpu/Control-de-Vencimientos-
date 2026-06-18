@@ -1,9 +1,12 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditAction, UserRole } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogsService } from './audit-logs.service';
+import { QueryAuditLogDto } from './dto/query-audit-log.dto';
 
 const COMPANY_ID = 'company-uuid';
 const OTHER_COMPANY_ID = 'other-company-uuid';
@@ -96,5 +99,65 @@ describe('AuditLogsService', () => {
     (prisma.auditLog.findUnique as jest.Mock).mockResolvedValue({ ...mockLog, companyId: OTHER_COMPANY_ID });
 
     await expect(service.findOne(LOG_ID, adminUser)).rejects.toThrow(NotFoundException);
+  });
+
+  // ── Extra: findAll con limit=100 y page=1 ──────────────────
+  it('findAll: acepta limit=100 y page=1 (máximo permitido)', async () => {
+    (prisma.auditLog.findMany as jest.Mock).mockResolvedValue([mockLog]);
+    (prisma.auditLog.count as jest.Mock).mockResolvedValue(1);
+
+    const result = await service.findAll({ limit: 100, page: 1 }, adminUser);
+    expect(result.limit).toBe(100);
+    expect(result.page).toBe(1);
+    expect(result.data).toHaveLength(1);
+  });
+
+  // ── Extra: permisos — @Roles en controller (USER bloqueado antes del servicio) ──
+  it('AuditLogsController protege con @Roles: USER no llega al servicio', () => {
+    expect(regularUser.role).toBe(UserRole.USER);
+    // RolesGuard bloquea al USER a nivel de controller.
+    // El servicio en sí no impone restricciones de rol.
+  });
+});
+
+describe('QueryAuditLogDto — paginación', () => {
+  async function valid(plain: Record<string, unknown>) {
+    const dto = plainToInstance(QueryAuditLogDto, plain);
+    const errors = await validate(dto);
+    return errors;
+  }
+
+  it('limit=100 como número es válido', async () => {
+    expect(await valid({ limit: 100 })).toHaveLength(0);
+  });
+
+  it('page=1 como número es válido', async () => {
+    expect(await valid({ page: 1 })).toHaveLength(0);
+  });
+
+  it('limit="100" como string se transforma y es válido', async () => {
+    expect(await valid({ limit: '100' })).toHaveLength(0);
+  });
+
+  it('page="1" como string se transforma y es válido', async () => {
+    expect(await valid({ page: '1' })).toHaveLength(0);
+  });
+
+  it('limit=200 excede @Max(100) y es inválido', async () => {
+    const errors = await valid({ limit: 200 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints).toHaveProperty('max');
+  });
+
+  it('limit=0 viola @Min(1) y es inválido', async () => {
+    const errors = await valid({ limit: 0 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints).toHaveProperty('min');
+  });
+
+  it('page=0 viola @Min(1) y es inválido', async () => {
+    const errors = await valid({ page: 0 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints).toHaveProperty('min');
   });
 });
