@@ -31,19 +31,36 @@ function dbLoad(k) { try { var r=localStorage.getItem(KEY+k); return r?JSON.pars
 function dbGet(k,def) { try { var r=localStorage.getItem(KEY+k); return r!==null?JSON.parse(r):def; } catch(e){ return def; } }
 
 function saveAll() {
-  dbSave('vehicles', App.vehicles);
-  dbSave('drivers', App.drivers);
   dbSave('expirations', App.expirations);
   dbSave('hazardous', App.hazardous);
   dbSave('history', App.history);
 }
 
 function loadAll() {
-  App.vehicles    = dbLoad('vehicles');
-  App.drivers     = dbLoad('drivers');
   App.expirations = dbLoad('expirations');
   App.hazardous   = dbLoad('hazardous');
   App.history     = dbLoad('history');
+}
+
+function loadApiData() {
+  return Promise.all([
+    apiJson('/vehicles?limit=100'),
+    apiJson('/drivers?limit=100')
+  ]).then(function(results) {
+    App.vehicles = results[0].data || [];
+    App.drivers  = results[1].data || [];
+    checkLegacyData();
+  }).catch(function(err) {
+    toast('Error al cargar datos del servidor: ' + (err.message || ''), 'error');
+  });
+}
+
+function checkLegacyData() {
+  var hasV = localStorage.getItem('lcp3_vehicles');
+  var hasD = localStorage.getItem('lcp3_drivers');
+  if (hasV || hasD) {
+    toast('Hay datos locales de vehículos/choferes sin migrar al servidor. Contacte al administrador.', 'warning');
+  }
 }
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -456,11 +473,13 @@ function renderVehicles() {
   var el=document.getElementById('view-vehicles');
   if(!el) return;
   var q=(App.vehicleSearch||'').toLowerCase();
-  var filtered=q?App.vehicles.filter(function(v){
+  var active=App.vehicles.filter(function(v){return v.active!==false;});
+  var inactive=App.vehicles.filter(function(v){return v.active===false;});
+  var filtered=q?active.filter(function(v){
     return (v.patent||'').toLowerCase().includes(q)||(v.brand||'').toLowerCase().includes(q)||(v.model||'').toLowerCase().includes(q);
-  }):App.vehicles;
-  var blk=App.vehicles.filter(function(v){return vehicleStatusStr(v.id)==='blocked';}).length;
-  var alt=App.vehicles.filter(function(v){return vehicleStatusStr(v.id)==='alert';}).length;
+  }):active;
+  var blk=active.filter(function(v){return vehicleStatusStr(v.id)==='blocked';}).length;
+  var alt=active.filter(function(v){return vehicleStatusStr(v.id)==='alert';}).length;
 
   var rows=filtered.map(function(v){
     var s=vehicleStatusStr(v.id);
@@ -477,31 +496,42 @@ function renderVehicles() {
       '<td><span class="badge '+sc+'">'+sl+'</span></td>'+
       '<td><div class="action-btns">'+
       '<button class="btn-icon" onclick="editVehicle(\''+v.id+'\')" title="Editar">'+editIcon()+'</button>'+
-      '<button class="btn-icon danger" onclick="delVehicle(\''+v.id+'\')" title="Eliminar">'+delIcon()+'</button>'+
+      (isAdmin()?'<button class="btn-icon danger" onclick="delVehicle(\''+v.id+'\')" title="Dar de baja">'+delIcon()+'</button>':'')+
       '</div></td></tr>';
   }).join('');
+
+  var inactiveRows=inactive.length&&isAdmin()?
+    '<tr><td colspan="7" style="padding:8px 12px;background:#f8fafc;font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Dados de baja ('+inactive.length+')</td></tr>'+
+    inactive.map(function(v){
+      return '<tr style="opacity:.55"><td><span style="font-weight:700;font-family:monospace">'+esc(v.patent)+'</span></td>'+
+        '<td>'+esc(v.brand)+' <span style="color:#94a3b8">'+esc(v.model)+'</span></td>'+
+        '<td>'+v.year+'</td><td>—</td><td>—</td>'+
+        '<td><span class="badge badge-expired">INACTIVO</span></td>'+
+        '<td><div class="action-btns"><button class="btn-icon" style="color:#22c55e" onclick="restoreVehicle(\''+v.id+'\')" title="Restaurar">'+renewIcon()+'</button></div></td></tr>';
+    }).join('')
+  :'';
 
   el.innerHTML=
     '<div class="page-header"><div><div class="page-title">Gestión de Vehículos</div>'+
     '<div class="page-subtitle">Control de flota y documentación vehicular</div></div>'+
     '<div class="page-actions"><button class="btn-primary" onclick="addVehicle()">'+plusIcon()+' Nuevo Vehículo</button></div></div>'+
     '<div class="stats-bar">'+
-    '<div class="stat-pill blue"><span class="stat-num">'+App.vehicles.length+'</span><span class="stat-label">Total</span></div>'+
-    '<div class="stat-pill green"><span class="stat-num">'+(App.vehicles.length-blk-alt)+'</span><span class="stat-label">Operativos</span></div>'+
+    '<div class="stat-pill blue"><span class="stat-num">'+active.length+'</span><span class="stat-label">Total activos</span></div>'+
+    '<div class="stat-pill green"><span class="stat-num">'+(active.length-blk-alt)+'</span><span class="stat-label">Operativos</span></div>'+
     '<div class="stat-pill orange"><span class="stat-num">'+alt+'</span><span class="stat-label">Con alertas</span></div>'+
     '<div class="stat-pill red"><span class="stat-num">'+blk+'</span><span class="stat-label">Bloqueados</span></div>'+
     '</div>'+
     '<div class="filter-row"><input type="text" class="filter-input" placeholder="Buscar patente, marca o modelo..." value="'+esc(App.vehicleSearch||'')+'" oninput="filterVehicles(this.value)"></div>'+
     '<div class="table-wrapper"><table>'+
     '<thead><tr><th>Patente</th><th>Marca / Modelo</th><th>Año</th><th>Chofer</th><th>Documentos</th><th>Estado</th><th>Acciones</th></tr></thead>'+
-    '<tbody>'+(rows||'<tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8">Sin vehículos registrados</td></tr>')+'</tbody></table></div>';
+    '<tbody>'+(rows+inactiveRows||'<tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8">Sin vehículos registrados</td></tr>')+'</tbody></table></div>';
 }
 
 function filterVehicles(v) { App.vehicleSearch=v; renderVehicles(); }
 
 function vehicleFormHtml(v) {
   v=v||{};
-  var dOpts='<option value="">— Sin asignar —</option>'+App.drivers.map(function(d){
+  var dOpts='<option value="">— Sin asignar —</option>'+App.drivers.filter(function(d){return d.active!==false;}).map(function(d){
     return '<option value="'+d.id+'"'+(v.driverId===d.id?' selected':'')+'>'+esc(d.name+' '+d.lastName)+'</option>';
   }).join('');
   return '<div class="form-grid">'+
@@ -521,14 +551,18 @@ function addVehicle() {
     var brand=(document.getElementById('fp-brand').value||'').trim();
     var model=(document.getElementById('fp-model').value||'').trim();
     if(!patent||!brand||!model){toast('Complete patente, marca y modelo','error');return false;}
-    var v={id:uid(),patent:patent,brand:brand,model:model,
-      year:parseInt(document.getElementById('fp-year').value)||new Date().getFullYear(),
-      driverId:document.getElementById('fp-driver').value||'',
-      notes:document.getElementById('fp-notes').value};
-    App.vehicles.push(v);
-    dbSave('vehicles',App.vehicles);
-    addHistory('create','vehicle',v.id,patent,'Vehículo '+patent+' registrado');
-    toast('Vehículo '+patent+' agregado'); closeModal(); renderVehicles(); updateBadges();
+    var body={patent:patent,brand:brand,model:model,
+      year:parseInt(document.getElementById('fp-year').value)||new Date().getFullYear()};
+    var driverId=document.getElementById('fp-driver').value;
+    if(driverId) body.driverId=driverId;
+    var notes=document.getElementById('fp-notes').value;
+    if(notes) body.notes=notes;
+    return apiJson('/vehicles',{method:'POST',body:JSON.stringify(body)})
+    .then(function(v){
+      App.vehicles.push(v);
+      toast('Vehículo '+v.patent+' agregado');
+      closeModal(); renderVehicles(); updateBadges();
+    }).catch(function(err){toast(err.message||'Error al guardar','error');});
   });
 }
 
@@ -541,24 +575,40 @@ function editVehicle(id) {
     var brand=(document.getElementById('fp-brand').value||'').trim();
     var model=(document.getElementById('fp-model').value||'').trim();
     if(!patent||!brand||!model){toast('Complete los campos obligatorios','error');return false;}
-    v.patent=patent; v.brand=brand; v.model=model;
-    v.year=parseInt(document.getElementById('fp-year').value)||v.year;
-    v.driverId=document.getElementById('fp-driver').value||'';
-    v.notes=document.getElementById('fp-notes').value;
-    dbSave('vehicles',App.vehicles);
-    addHistory('update','vehicle',id,patent,'Vehículo '+patent+' actualizado');
-    toast('Vehículo actualizado'); closeModal(); renderVehicles(); updateBadges();
+    var body={patent:patent,brand:brand,model:model,
+      year:parseInt(document.getElementById('fp-year').value)||v.year,
+      driverId:document.getElementById('fp-driver').value||null,
+      notes:document.getElementById('fp-notes').value||null};
+    return apiJson('/vehicles/'+id,{method:'PATCH',body:JSON.stringify(body)})
+    .then(function(updated){
+      var idx=App.vehicles.findIndex(function(x){return x.id===id;});
+      if(idx!==-1) App.vehicles[idx]=updated;
+      toast('Vehículo actualizado');
+      closeModal(); renderVehicles(); updateBadges();
+    }).catch(function(err){toast(err.message||'Error al actualizar','error');});
   });
 }
 
 function delVehicle(id) {
   var v=App.vehicles.find(function(x){return x.id===id;});
-  if(!v||!confirm('¿Eliminar el vehículo '+v.patent+'? Esta acción no se puede deshacer.')) return;
-  App.vehicles=App.vehicles.filter(function(x){return x.id!==id;});
-  App.expirations=App.expirations.filter(function(e){return e.vehicleId!==id;});
-  dbSave('vehicles',App.vehicles); dbSave('expirations',App.expirations);
-  addHistory('delete','vehicle',id,v.patent,'Vehículo '+v.patent+' eliminado');
-  toast('Vehículo eliminado','warning'); renderVehicles(); updateBadges();
+  if(!v||!confirm('¿Dar de baja el vehículo '+v.patent+'?')) return;
+  apiJson('/vehicles/'+id,{method:'DELETE'})
+  .then(function(){
+    var idx=App.vehicles.findIndex(function(x){return x.id===id;});
+    if(idx!==-1) App.vehicles[idx].active=false;
+    App.expirations=App.expirations.filter(function(e){return e.vehicleId!==id;});
+    dbSave('expirations',App.expirations);
+    toast('Vehículo dado de baja','warning'); renderVehicles(); updateBadges();
+  }).catch(function(err){toast(err.message||'Error al dar de baja','error');});
+}
+
+function restoreVehicle(id) {
+  apiJson('/vehicles/'+id+'/restore',{method:'PATCH'})
+  .then(function(v){
+    var idx=App.vehicles.findIndex(function(x){return x.id===id;});
+    if(idx!==-1) App.vehicles[idx]=v; else App.vehicles.push(v);
+    toast('Vehículo restaurado'); renderVehicles(); updateBadges();
+  }).catch(function(err){toast(err.message||'Error al restaurar','error');});
 }
 
 // ─── DRIVERS ─────────────────────────────────────────────────
@@ -566,11 +616,13 @@ function renderDrivers() {
   var el=document.getElementById('view-drivers');
   if(!el) return;
   var q=(App.driverSearch||'').toLowerCase();
-  var filtered=q?App.drivers.filter(function(d){
-    return (d.name+' '+d.lastName).toLowerCase().includes(q)||d.dni.includes(q);
-  }):App.drivers;
-  var blk=App.drivers.filter(function(d){return driverStatusStr(d.id)==='blocked';}).length;
-  var alt=App.drivers.filter(function(d){return driverStatusStr(d.id)==='alert';}).length;
+  var active=App.drivers.filter(function(d){return d.active!==false;});
+  var inactive=App.drivers.filter(function(d){return d.active===false;});
+  var filtered=q?active.filter(function(d){
+    return (d.name+' '+d.lastName).toLowerCase().includes(q)||(d.dni||'').includes(q);
+  }):active;
+  var blk=active.filter(function(d){return driverStatusStr(d.id)==='blocked';}).length;
+  var alt=active.filter(function(d){return driverStatusStr(d.id)==='alert';}).length;
 
   function docCell(did,type) {
     var e=App.expirations.find(function(x){return x.driverId===did&&x.type===type;});
@@ -584,32 +636,43 @@ function renderDrivers() {
     var sc=s==='blocked'?'badge-expired':s==='alert'?'badge-warning':'badge-ok';
     var sl=s==='blocked'?'NO HABILITADO':s==='alert'?'ALERTA':'HABILITADO';
     return '<tr><td><div style="font-weight:600">'+esc(d.name+' '+d.lastName)+'</div></td>'+
-      '<td style="color:#94a3b8">'+esc(d.dni)+'</td>'+
-      '<td><span class="badge badge-info">Cat. '+esc(d.licenseCategory)+'</span></td>'+
+      '<td style="color:#94a3b8">'+esc(d.dni||'')+'</td>'+
+      '<td><span class="badge badge-info">Cat. '+esc(d.licenseCategory||'')+'</span></td>'+
       '<td>'+docCell(d.id,'Licencia de Conducir')+'</td>'+
       '<td>'+docCell(d.id,'Psicofísico')+'</td>'+
       '<td>'+docCell(d.id,'ART')+'</td>'+
       '<td><span class="badge '+sc+'">'+sl+'</span></td>'+
       '<td><div class="action-btns">'+
       '<button class="btn-icon" onclick="editDriver(\''+d.id+'\')" title="Editar">'+editIcon()+'</button>'+
-      '<button class="btn-icon danger" onclick="delDriver(\''+d.id+'\')" title="Eliminar">'+delIcon()+'</button>'+
+      (isAdmin()?'<button class="btn-icon danger" onclick="delDriver(\''+d.id+'\')" title="Dar de baja">'+delIcon()+'</button>':'')+
       '</div></td></tr>';
   }).join('');
+
+  var inactiveRows=inactive.length&&isAdmin()?
+    '<tr><td colspan="8" style="padding:8px 12px;background:#f8fafc;font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Dados de baja ('+inactive.length+')</td></tr>'+
+    inactive.map(function(d){
+      return '<tr style="opacity:.55"><td><div style="font-weight:600">'+esc(d.name+' '+d.lastName)+'</div></td>'+
+        '<td style="color:#94a3b8">'+esc(d.dni||'')+'</td>'+
+        '<td>—</td><td>—</td><td>—</td><td>—</td>'+
+        '<td><span class="badge badge-expired">INACTIVO</span></td>'+
+        '<td><div class="action-btns"><button class="btn-icon" style="color:#22c55e" onclick="restoreDriver(\''+d.id+'\')" title="Restaurar">'+renewIcon()+'</button></div></td></tr>';
+    }).join('')
+  :'';
 
   el.innerHTML=
     '<div class="page-header"><div><div class="page-title">Gestión de Choferes</div>'+
     '<div class="page-subtitle">Control de habilitaciones y documentación de conductores</div></div>'+
     '<div class="page-actions"><button class="btn-primary" onclick="addDriver()">'+plusIcon()+' Nuevo Chofer</button></div></div>'+
     '<div class="stats-bar">'+
-    '<div class="stat-pill blue"><span class="stat-num">'+App.drivers.length+'</span><span class="stat-label">Total</span></div>'+
-    '<div class="stat-pill green"><span class="stat-num">'+(App.drivers.length-blk-alt)+'</span><span class="stat-label">Habilitados</span></div>'+
+    '<div class="stat-pill blue"><span class="stat-num">'+active.length+'</span><span class="stat-label">Total activos</span></div>'+
+    '<div class="stat-pill green"><span class="stat-num">'+(active.length-blk-alt)+'</span><span class="stat-label">Habilitados</span></div>'+
     '<div class="stat-pill orange"><span class="stat-num">'+alt+'</span><span class="stat-label">Con alertas</span></div>'+
     '<div class="stat-pill red"><span class="stat-num">'+blk+'</span><span class="stat-label">Bloqueados</span></div>'+
     '</div>'+
     '<div class="filter-row"><input type="text" class="filter-input" placeholder="Buscar por nombre o DNI..." value="'+esc(App.driverSearch||'')+'" oninput="filterDrivers(this.value)"></div>'+
     '<div class="table-wrapper"><table>'+
     '<thead><tr><th>Nombre</th><th>DNI</th><th>Cat.</th><th>Vto. Licencia</th><th>Vto. Psicofísico</th><th>Vto. ART</th><th>Estado</th><th>Acciones</th></tr></thead>'+
-    '<tbody>'+(rows||'<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">Sin choferes registrados</td></tr>')+'</tbody></table></div>';
+    '<tbody>'+(rows+inactiveRows||'<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">Sin choferes registrados</td></tr>')+'</tbody></table></div>';
 }
 
 function filterDrivers(v) { App.driverSearch=v; renderDrivers(); }
@@ -633,14 +696,17 @@ function addDriver() {
     var name=(document.getElementById('fd-name').value||'').trim();
     var lastName=(document.getElementById('fd-lastName').value||'').trim();
     if(!name||!lastName){toast('Complete nombre y apellido','error');return false;}
-    var d={id:uid(),name:name,lastName:lastName,dni:document.getElementById('fd-dni').value.trim(),
+    var body={name:name,lastName:lastName,
+      dni:document.getElementById('fd-dni').value.trim(),
       licenseNumber:document.getElementById('fd-license').value.trim(),
       licenseCategory:document.getElementById('fd-cat').value,
-      notes:document.getElementById('fd-notes').value};
-    App.drivers.push(d);
-    dbSave('drivers',App.drivers);
-    addHistory('create','driver',d.id,name+' '+lastName,'Chofer '+name+' '+lastName+' registrado');
-    toast('Chofer agregado'); closeModal(); renderDrivers(); updateBadges();
+      notes:document.getElementById('fd-notes').value||undefined};
+    return apiJson('/drivers',{method:'POST',body:JSON.stringify(body)})
+    .then(function(d){
+      App.drivers.push(d);
+      toast('Chofer '+d.name+' '+d.lastName+' agregado');
+      closeModal(); renderDrivers(); updateBadges();
+    }).catch(function(err){toast(err.message||'Error al guardar','error');});
   });
 }
 
@@ -652,24 +718,39 @@ function editDriver(id) {
     var name=(document.getElementById('fd-name').value||'').trim();
     var lastName=(document.getElementById('fd-lastName').value||'').trim();
     if(!name||!lastName){toast('Complete nombre y apellido','error');return false;}
-    d.name=name; d.lastName=lastName;
-    d.dni=document.getElementById('fd-dni').value.trim();
-    d.licenseNumber=document.getElementById('fd-license').value.trim();
-    d.licenseCategory=document.getElementById('fd-cat').value;
-    d.notes=document.getElementById('fd-notes').value;
-    dbSave('drivers',App.drivers);
-    addHistory('update','driver',id,name+' '+lastName,'Chofer actualizado');
-    toast('Chofer actualizado'); closeModal(); renderDrivers(); updateBadges();
+    var body={name:name,lastName:lastName,
+      dni:document.getElementById('fd-dni').value.trim(),
+      licenseNumber:document.getElementById('fd-license').value.trim(),
+      licenseCategory:document.getElementById('fd-cat').value,
+      notes:document.getElementById('fd-notes').value||null};
+    return apiJson('/drivers/'+id,{method:'PATCH',body:JSON.stringify(body)})
+    .then(function(updated){
+      var idx=App.drivers.findIndex(function(x){return x.id===id;});
+      if(idx!==-1) App.drivers[idx]=updated;
+      toast('Chofer actualizado');
+      closeModal(); renderDrivers(); updateBadges();
+    }).catch(function(err){toast(err.message||'Error al actualizar','error');});
   });
 }
 
 function delDriver(id) {
   var d=App.drivers.find(function(x){return x.id===id;});
-  if(!d||!confirm('¿Eliminar al chofer '+d.name+' '+d.lastName+'?')) return;
-  App.drivers=App.drivers.filter(function(x){return x.id!==id;});
-  dbSave('drivers',App.drivers);
-  addHistory('delete','driver',id,d.name+' '+d.lastName,'Chofer eliminado');
-  toast('Chofer eliminado','warning'); renderDrivers(); updateBadges();
+  if(!d||!confirm('¿Dar de baja al chofer '+d.name+' '+d.lastName+'?')) return;
+  apiJson('/drivers/'+id,{method:'DELETE'})
+  .then(function(){
+    var idx=App.drivers.findIndex(function(x){return x.id===id;});
+    if(idx!==-1) App.drivers[idx].active=false;
+    toast('Chofer dado de baja','warning'); renderDrivers(); updateBadges();
+  }).catch(function(err){toast(err.message||'Error al dar de baja','error');});
+}
+
+function restoreDriver(id) {
+  apiJson('/drivers/'+id+'/restore',{method:'PATCH'})
+  .then(function(d){
+    var idx=App.drivers.findIndex(function(x){return x.id===id;});
+    if(idx!==-1) App.drivers[idx]=d; else App.drivers.push(d);
+    toast('Chofer restaurado'); renderDrivers(); updateBadges();
+  }).catch(function(err){toast(err.message||'Error al restaurar','error');});
 }
 
 // ─── EXPIRATIONS ─────────────────────────────────────────────
@@ -1468,7 +1549,13 @@ document.addEventListener('DOMContentLoaded', function() {
   if(mCancel) mCancel.addEventListener('click', closeModal);
   if(mOv) mOv.addEventListener('click', function(e){ if(e.target===mOv) closeModal(); });
   if(mSave) mSave.addEventListener('click', function() {
-    if(App.modalCb) { var r=App.modalCb(); if(r===false) return; } else closeModal();
+    if(!App.modalCb) { closeModal(); return; }
+    var r=App.modalCb();
+    if(r===false) return;
+    if(r&&typeof r.then==='function') {
+      mSave.disabled=true;
+      r.catch(function(){}).finally(function(){ mSave.disabled=false; });
+    }
   });
 
   // Search
@@ -1483,7 +1570,11 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 
   // Start
-  navigate('dashboard');
+  initLoginForm();
+  checkSession().then(function(user) {
+    if (!user) return;
+    loadApiData().then(function() { navigate('dashboard'); });
+  });
 });
 
 // Expose to global for onclick handlers
@@ -1493,10 +1584,12 @@ window.filterVehicles = filterVehicles;
 window.addVehicle   = addVehicle;
 window.editVehicle  = editVehicle;
 window.delVehicle   = delVehicle;
+window.restoreVehicle = restoreVehicle;
 window.filterDrivers = filterDrivers;
 window.addDriver    = addDriver;
 window.editDriver   = editDriver;
 window.delDriver    = delDriver;
+window.restoreDriver = restoreDriver;
 window.setExpFilter = setExpFilter;
 window.addExp       = addExp;
 window.editExp      = editExp;
