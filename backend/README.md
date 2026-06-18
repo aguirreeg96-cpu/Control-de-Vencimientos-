@@ -200,6 +200,228 @@ npm run test:cov
 
 ---
 
+## CRUD de recursos (Etapa 4)
+
+### Regla principal: aislamiento multiempresa
+
+`companyId` **siempre** proviene del JWT (`@CurrentUser()`). Nunca se acepta desde body, query, params ni headers. Un recurso existente pero de otra empresa devuelve **404** (no 403) para no revelar su existencia.
+
+### Status calculado (Expirations y HazardousDocuments)
+
+| Status | Condición |
+|--------|-----------|
+| `EXPIRED` | `expiryDate` < inicio del día hoy (UTC) |
+| `EXPIRING_SOON` | vence dentro de los próximos 30 días inclusive |
+| `VALID` | vence después de 30 días |
+
+El campo `status` se calcula en cada respuesta, **nunca se persiste en la BD**.
+
+### Roles
+
+| Operación | Roles permitidos |
+|-----------|-----------------|
+| Lectura (GET) | SUPER_ADMIN, COMPANY_ADMIN, USER |
+| Creación/Edición | SUPER_ADMIN, COMPANY_ADMIN, USER |
+| Baja lógica / Restore / Delete físico | SUPER_ADMIN, COMPANY_ADMIN |
+| Auditoría (GET /audit-logs) | SUPER_ADMIN, COMPANY_ADMIN |
+
+### Paginación (todos los listados)
+
+Query params: `page` (default 1), `limit` (default 20, máx 100), `sortBy`, `sortOrder` (`asc`|`desc`)
+
+Respuesta:
+```json
+{ "data": [...], "page": 1, "limit": 20, "total": 42, "totalPages": 3 }
+```
+
+---
+
+### Vehículos — `/api/vehicles`
+
+| Método | Ruta | Descripción | Roles mínimos |
+|--------|------|-------------|---------------|
+| GET | `/api/vehicles` | Listar vehículos | USER |
+| GET | `/api/vehicles/:id` | Obtener vehículo | USER |
+| POST | `/api/vehicles` | Crear vehículo | USER |
+| PATCH | `/api/vehicles/:id` | Actualizar vehículo | USER (sin `active`) |
+| DELETE | `/api/vehicles/:id` | Baja lógica (active=false) | COMPANY_ADMIN |
+| PATCH | `/api/vehicles/:id/restore` | Restaurar | COMPANY_ADMIN |
+
+**Filtros GET:** `search` (patent, brand, model), `active` (true/false), `driverId`
+
+**Body POST:**
+```json
+{
+  "patent": "ABC123",
+  "brand": "Ford",
+  "model": "Ranger",
+  "year": 2022,
+  "driverId": "uuid-opcional",
+  "notes": "Texto opcional"
+}
+```
+
+> `patent` se normaliza a mayúsculas. Si `driverId` se envía, el chofer debe pertenecer a la misma empresa y estar activo.
+
+**Curl de ejemplo:**
+```bash
+curl -X POST http://localhost:3000/api/vehicles \
+  -H "Authorization: Bearer TOKEN_AQUI" \
+  -H "Content-Type: application/json" \
+  -d '{"patent":"ABC123","brand":"Ford","model":"Ranger","year":2022}'
+```
+
+---
+
+### Choferes — `/api/drivers`
+
+| Método | Ruta | Descripción | Roles mínimos |
+|--------|------|-------------|---------------|
+| GET | `/api/drivers` | Listar choferes | USER |
+| GET | `/api/drivers/:id` | Obtener chofer | USER |
+| POST | `/api/drivers` | Crear chofer | USER |
+| PATCH | `/api/drivers/:id` | Actualizar chofer | USER (sin `active`) |
+| DELETE | `/api/drivers/:id` | Baja lógica | COMPANY_ADMIN |
+| PATCH | `/api/drivers/:id/restore` | Restaurar | COMPANY_ADMIN |
+
+**Filtros GET:** `search` (name, lastName, dni, licenseNumber), `active`, `licenseCategory`
+
+**Body POST:**
+```json
+{
+  "name": "Juan",
+  "lastName": "Pérez",
+  "dni": "12345678",
+  "licenseCategory": "D",
+  "licenseNumber": "LIC-001",
+  "notes": "Texto opcional"
+}
+```
+
+> `dni` es único por empresa.
+
+---
+
+### Vencimientos — `/api/expirations`
+
+| Método | Ruta | Descripción | Roles mínimos |
+|--------|------|-------------|---------------|
+| GET | `/api/expirations/summary` | Resumen por empresa | USER |
+| GET | `/api/expirations` | Listar vencimientos | USER |
+| GET | `/api/expirations/:id` | Obtener vencimiento | USER |
+| POST | `/api/expirations` | Crear vencimiento | USER |
+| PATCH | `/api/expirations/:id` | Actualizar vencimiento | USER |
+| DELETE | `/api/expirations/:id` | Borrado físico | USER |
+
+**Filtros GET:** `search` (type, description, observations), `category`, `status`, `vehicleId`, `driverId`, `expiryFrom`, `expiryTo`
+
+**Reglas por categoría:**
+
+| Categoría | vehicleId | driverId |
+|-----------|-----------|----------|
+| `VEHICLE` | Obligatorio | Prohibido |
+| `DRIVER` | Prohibido | Obligatorio |
+| `COMPANY` | Prohibido | Prohibido |
+| `WASTE` | Opcional | Opcional |
+
+**Body POST:**
+```json
+{
+  "type": "Seguro RC",
+  "category": "VEHICLE",
+  "vehicleId": "uuid-del-vehiculo",
+  "issueDate": "2025-01-01",
+  "expiryDate": "2026-12-31",
+  "description": "Seguro de responsabilidad civil",
+  "observations": "Texto opcional"
+}
+```
+
+**GET /api/expirations/summary — respuesta:**
+```json
+{
+  "total": 10,
+  "expired": 2,
+  "expiringSoon": 3,
+  "valid": 5,
+  "byCategory": {
+    "VEHICLE": { "total": 4, "expired": 1, "expiringSoon": 1, "valid": 2 },
+    "DRIVER": { "total": 3, "expired": 1, "expiringSoon": 1, "valid": 1 },
+    "COMPANY": { "total": 2, "expired": 0, "expiringSoon": 1, "valid": 1 },
+    "WASTE": { "total": 1, "expired": 0, "expiringSoon": 0, "valid": 1 }
+  }
+}
+```
+
+---
+
+### Documentación de residuos peligrosos — `/api/hazardous-documents`
+
+| Método | Ruta | Descripción | Roles mínimos |
+|--------|------|-------------|---------------|
+| GET | `/api/hazardous-documents` | Listar documentos | USER |
+| GET | `/api/hazardous-documents/:id` | Obtener documento | USER |
+| POST | `/api/hazardous-documents` | Crear documento | USER |
+| PATCH | `/api/hazardous-documents/:id` | Actualizar documento | USER |
+| DELETE | `/api/hazardous-documents/:id` | **Borrado físico** | COMPANY_ADMIN |
+
+> `HazardousDocument` no tiene campo `active`, por lo que el DELETE es físico. Se crea un `AuditLog` con `action=DELETE` en la misma transacción antes de eliminar el registro.
+
+**Filtros GET:** `search` (type, entityName, permitNumber, issuingAuthority), `status`, `expiryFrom`, `expiryTo`
+
+**Body POST:**
+```json
+{
+  "type": "Habilitación Ambiental",
+  "entityName": "Empresa SA",
+  "permitNumber": "HA-001",
+  "issuingAuthority": "Min. Ambiente",
+  "issueDate": "2025-01-01",
+  "expiryDate": "2026-06-30",
+  "observations": "Texto opcional"
+}
+```
+
+---
+
+### Auditoría — `/api/audit-logs`
+
+| Método | Ruta | Descripción | Roles mínimos |
+|--------|------|-------------|---------------|
+| GET | `/api/audit-logs` | Listar registros | COMPANY_ADMIN |
+| GET | `/api/audit-logs/:id` | Obtener registro | COMPANY_ADMIN |
+
+> **No existen endpoints POST, PATCH ni DELETE.** Los registros de auditoría son inmutables. Un usuario con rol `USER` recibe **403** al intentar acceder.
+
+**Filtros GET:** `action` (CREATE/UPDATE/DELETE/RENEW), `entityType`, `entityId`, `dateFrom`, `dateTo`
+
+**Metadata por operación:**
+```json
+{
+  "before": { "...campos previos..." },
+  "after": { "...campos nuevos..." },
+  "userId": "uuid-del-usuario",
+  "userEmail": "correo@empresa.com"
+}
+```
+
+> `passwordHash`, tokens y hashes nunca se incluyen en metadata.
+
+---
+
+### Transaccionalidad
+
+Toda operación CUD ejecuta:
+```
+prisma.$transaction(async tx => {
+  1. Modificar/crear/eliminar entidad
+  2. Crear AuditLog con acción, entityType, entityId, metadata {before, after, userId}
+})
+```
+Si alguno falla, ambos se revierten.
+
+---
+
 ## Estructura de entidades (Etapa 2)
 
 ```
@@ -252,6 +474,6 @@ companies          → Empresas (multiempresa)
 - [x] **Etapa 1** — Estructura NestJS base, health endpoint, Prisma configurado
 - [x] **Etapa 2** — Schema de base de datos inicial (6 entidades, enums, índices, relaciones)
 - [x] **Etapa 3** — Autenticación JWT + usuarios + guards globales
-- [ ] **Etapa 4** — CRUD de vehículos, choferes, vencimientos y residuos
+- [x] **Etapa 4** — CRUD multiempresa: vehículos, choferes, vencimientos, residuos peligrosos, auditoría
 - [ ] **Etapa 5** — Conexión con el frontend
 - [ ] **Etapa 6** — Migración de datos desde localStorage

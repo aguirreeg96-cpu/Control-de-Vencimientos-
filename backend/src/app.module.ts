@@ -7,6 +7,11 @@ import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { VehiclesModule } from './vehicles/vehicles.module';
+import { DriversModule } from './drivers/drivers.module';
+import { ExpirationsModule } from './expirations/expirations.module';
+import { HazardousDocumentsModule } from './hazardous-documents/hazardous-documents.module';
+import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -17,6 +22,11 @@ import { RolesGuard } from './auth/guards/roles.guard';
     HealthModule,
     AuthModule,
     UsersModule,
+    VehiclesModule,
+    DriversModule,
+    ExpirationsModule,
+    HazardousDocumentsModule,
+    AuditLogsModule,
   ],
   controllers: [AppController],
   providers: [
