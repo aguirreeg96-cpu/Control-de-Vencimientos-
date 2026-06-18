@@ -1,0 +1,15 @@
+[build]
+  publish = "."
+  # Sin build command — sitio estático puro
+
+# Headers de seguridad para todas las páginas
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options    = "nosniff"
+    X-Frame-Options           = "DENY"
+    Referrer-Policy           = "strict-origin-when-cross-origin"
+    Permissions-Policy        = "camera=(), microphone=(), geolocation=()"
+    # Content-Security-Policy: descomentá y actualizá con tu URL de Render
+    # una vez que la tengas. El connect-src debe incluir el backend.
+    # Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://TU-BACKEND.onrender.com; img-src 'self' data:; font-src 'self'"

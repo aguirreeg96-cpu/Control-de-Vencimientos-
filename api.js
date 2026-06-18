@@ -3,7 +3,10 @@
    HTTP transport + token management
    ============================================================ */
 
-var API_BASE = 'http://localhost:3000/api';
+if (!window.APP_CONFIG || !window.APP_CONFIG.API_BASE_URL) {
+  throw new Error('[LOGICONTROL PRO] config.js no cargado — falta APP_CONFIG.API_BASE_URL');
+}
+var API_BASE = window.APP_CONFIG.API_BASE_URL;
 
 // ─── TOKEN STORE ─────────────────────────────────────────────
 // accessToken: sessionStorage (cleared on tab close)
