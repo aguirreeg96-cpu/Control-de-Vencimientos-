@@ -1,18 +1,32 @@
 import {
-  Injectable,
-  ForbiddenException,
-  UnauthorizedException,
   ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../prisma/prisma.service';
+import { JwtService } from '@nestjs/jwt';
+import { UserRole } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
-import { RegisterDto } from './dto/register.dto';
+import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
 import { JwtPayload } from './types/jwt-payload.type';
-import { UserRole } from '@prisma/client';
+
+const USER_SAFE_SELECT = {
+  id: true,
+  companyId: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  role: true,
+  active: true,
+  lastLoginAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 @Injectable()
 export class AuthService {
@@ -59,13 +73,25 @@ export class AuthService {
     const email = dto.email.toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
 
-    if (!user || !user.active) {
+    if (!user) {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
     const passwordValid = await argon2.verify(user.passwordHash, dto.password);
     if (!passwordValid) {
       throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    if (!user.active) {
+      throw new UnauthorizedException('Cuenta desactivada');
+    }
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: user.companyId },
+      select: { active: true },
+    });
+    if (!company || !company.active) {
+      throw new ForbiddenException('Empresa desactivada');
     }
 
     await this.prisma.user.update({
@@ -99,6 +125,12 @@ export class AuthService {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: record.userId } });
     if (!user.active) throw new UnauthorizedException('Cuenta desactivada');
 
+    const company = await this.prisma.company.findUnique({
+      where: { id: user.companyId },
+      select: { active: true },
+    });
+    if (!company || !company.active) throw new ForbiddenException('Empresa desactivada');
+
     const tokens = await this.generateTokens(user.id, user.email, user.role, user.companyId);
     return tokens;
   }
@@ -114,6 +146,15 @@ export class AuthService {
         data: { revokedAt: new Date() },
       })
       .catch(() => undefined);
+  }
+
+  async getMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: USER_SAFE_SELECT,
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    return user;
   }
 
   private async generateTokens(

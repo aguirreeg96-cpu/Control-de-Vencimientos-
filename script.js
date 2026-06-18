@@ -9,6 +9,7 @@ const CATS = { vehicle:'Vehículo', driver:'Chofer', company:'Empresa', waste:'R
 // ─── STATE ───────────────────────────────────────────────────
 var App = {
   vehicles: [], drivers: [], expirations: [], hazardous: [], history: [], auditLogs: [],
+  companies: [], adminUsers: [],
   view: 'dashboard',
   calYear: new Date().getFullYear(),
   calMonth: new Date().getMonth(),
@@ -22,7 +23,8 @@ var App = {
   alertTab: 'all',
   reportType: 'expired',
   reportData: [],
-  historySearch: ''
+  historySearch: '',
+  adminTab: 'users'
 };
 
 // ─── STORAGE ─────────────────────────────────────────────────
@@ -208,14 +210,18 @@ function navigate(view) {
     l.classList.toggle('active', l.getAttribute('data-view')===view);
   });
   closeSidebar();
-  renderView(view);
+  if (view === 'admin') {
+    loadAdminData().then(function(){ renderView(view); });
+  } else {
+    renderView(view);
+  }
   updateBadges();
 }
 
 function renderView(v) {
   var map={dashboard:renderDashboard,alerts:renderAlerts,vehicles:renderVehicles,
     drivers:renderDrivers,expirations:renderExpirations,hazardous:renderHazardous,
-    calendar:renderCalendar,reports:renderReports,history:renderHistory};
+    calendar:renderCalendar,reports:renderReports,history:renderHistory,admin:renderAdmin};
   if(map[v]) map[v]();
 }
 
@@ -1542,6 +1548,281 @@ function renderHistory() {
 
 function filterHistory(v) { App.historySearch=v; renderHistory(); }
 
+// ─── ADMIN ───────────────────────────────────────────────────
+function loadAdminData() {
+  var user = UserStore ? UserStore.get() : null;
+  if (!user) return Promise.resolve();
+  var tasks = [apiJson('/users?limit=100')];
+  if (user.role === 'SUPER_ADMIN') tasks.push(apiJson('/companies'));
+  return Promise.allSettled(tasks).then(function(results) {
+    if (results[0].status === 'fulfilled') App.adminUsers = results[0].value || [];
+    if (results[1] && results[1].status === 'fulfilled') App.companies = results[1].value || [];
+  });
+}
+
+function setAdminTab(tab) { App.adminTab = tab; renderAdmin(); }
+
+function renderAdmin() {
+  var el = document.getElementById('view-admin');
+  if (!el) return;
+  var user = UserStore ? UserStore.get() : null;
+  if (!user) return;
+  var isSA = user.role === 'SUPER_ADMIN';
+  var isCA = user.role === 'COMPANY_ADMIN';
+  if (!isSA && !isCA && user.role !== 'USER') { el.innerHTML = ''; return; }
+
+  var tabs = [];
+  if (isSA) tabs.push({ id: 'companies', label: 'Empresas' });
+  if (isSA || isCA) tabs.push({ id: 'users', label: 'Usuarios' });
+  tabs.push({ id: 'password', label: 'Mi Contraseña' });
+
+  var validTabs = tabs.map(function(t){ return t.id; });
+  if (validTabs.indexOf(App.adminTab) === -1) App.adminTab = validTabs[0];
+
+  var tabsHtml = tabs.map(function(t) {
+    return '<button class="btn-tab'+(App.adminTab===t.id?' active':'')+'" onclick="setAdminTab(\''+t.id+'\')">'+esc(t.label)+'</button>';
+  }).join('');
+
+  var body = '';
+  if (App.adminTab === 'companies') body = renderAdminCompanies();
+  else if (App.adminTab === 'users') body = renderAdminUsers();
+  else body = renderAdminPassword();
+
+  el.innerHTML =
+    '<div class="page-header"><div><div class="page-title">Administración</div>'+
+    '<div class="page-subtitle">Gestión de usuarios y empresas</div></div></div>'+
+    '<div class="tab-bar">'+tabsHtml+'</div>'+
+    '<div class="admin-body">'+body+'</div>';
+}
+
+function renderAdminCompanies() {
+  var rows = App.companies.length ? App.companies.map(function(c) {
+    var statusCls = c.active ? 'badge-ok' : 'badge-expired';
+    var statusTxt = c.active ? 'Activa' : 'Inactiva';
+    return '<tr>'+
+      '<td>'+esc(c.name)+'</td>'+
+      '<td>'+esc(c.taxId||'—')+'</td>'+
+      '<td><span class="badge '+statusCls+'">'+statusTxt+'</span></td>'+
+      '<td>'+fmtDate(c.createdAt)+'</td>'+
+      '<td>'+
+        '<button class="btn-sm btn-ghost" onclick="editCompany(\''+c.id+'\')">Editar</button> '+
+        '<button class="btn-sm btn-ghost" onclick="toggleCompanyStatus(\''+c.id+'\','+(!c.active)+')">'+(c.active?'Desactivar':'Activar')+'</button>'+
+      '</td></tr>';
+  }).join('') : '<tr><td colspan="5" style="text-align:center;color:#94a3b8">No hay empresas registradas</td></tr>';
+
+  return '<div style="display:flex;justify-content:flex-end;margin-bottom:12px">'+
+    '<button class="btn-primary" onclick="addCompany()">+ Nueva Empresa</button></div>'+
+    '<div class="table-wrap"><table class="data-table">'+
+    '<thead><tr><th>Nombre</th><th>CUIT/CUIL</th><th>Estado</th><th>Fecha Alta</th><th>Acciones</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div>';
+}
+
+function renderAdminUsers() {
+  var rows = App.adminUsers.length ? App.adminUsers.map(function(u) {
+    var statusCls = u.active ? 'badge-ok' : 'badge-expired';
+    var statusTxt = u.active ? 'Activo' : 'Inactivo';
+    var roleLabels = { SUPER_ADMIN: 'Super Admin', COMPANY_ADMIN: 'Admin', USER: 'Usuario' };
+    return '<tr>'+
+      '<td>'+esc(u.firstName+' '+u.lastName)+'</td>'+
+      '<td>'+esc(u.email)+'</td>'+
+      '<td><span class="badge badge-ok" style="background:#dbeafe;color:#1d4ed8">'+esc(roleLabels[u.role]||u.role)+'</span></td>'+
+      '<td><span class="badge '+statusCls+'">'+statusTxt+'</span></td>'+
+      '<td>'+
+        '<button class="btn-sm btn-ghost" onclick="adminEditUser(\''+u.id+'\')">Editar</button> '+
+        '<button class="btn-sm btn-ghost" onclick="adminToggleUser(\''+u.id+'\','+(!u.active)+')">'+(u.active?'Desactivar':'Activar')+'</button> '+
+        '<button class="btn-sm btn-ghost" onclick="adminResetPwd(\''+u.id+'\')">Reset Clave</button>'+
+      '</td></tr>';
+  }).join('') : '<tr><td colspan="5" style="text-align:center;color:#94a3b8">No hay usuarios</td></tr>';
+
+  return '<div style="display:flex;justify-content:flex-end;margin-bottom:12px">'+
+    '<button class="btn-primary" onclick="adminAddUser()">+ Nuevo Usuario</button></div>'+
+    '<div class="table-wrap"><table class="data-table">'+
+    '<thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div>';
+}
+
+function renderAdminPassword() {
+  return '<div style="max-width:420px">'+
+    '<h3 style="margin:0 0 16px;font-size:16px;font-weight:600">Cambiar contraseña</h3>'+
+    '<div class="form-group"><label>Contraseña actual</label>'+
+    '<input type="password" id="adm-pwd-current" class="form-control" autocomplete="current-password"></div>'+
+    '<div class="form-group"><label>Nueva contraseña</label>'+
+    '<input type="password" id="adm-pwd-new" class="form-control" autocomplete="new-password"></div>'+
+    '<div class="form-group"><label>Confirmar nueva contraseña</label>'+
+    '<input type="password" id="adm-pwd-confirm" class="form-control" autocomplete="new-password"></div>'+
+    '<p id="adm-pwd-error" style="color:#ef4444;font-size:13px;min-height:18px"></p>'+
+    '<button class="btn-primary" onclick="adminChangePassword()">Cambiar contraseña</button>'+
+    '</div>';
+}
+
+function addCompany() {
+  openModal('Nueva Empresa',
+    '<div class="form-group"><label>Nombre <span class="req">*</span></label><input id="m-co-name" class="form-control" maxlength="120"></div>'+
+    '<div class="form-group"><label>CUIT/CUIL</label><input id="m-co-tax" class="form-control" maxlength="30"></div>',
+    function() {
+      var name = (document.getElementById('m-co-name').value||'').trim();
+      if (!name) { toast('Nombre requerido','error'); return; }
+      return apiJson('/companies', { method:'POST', body: JSON.stringify({ name:name, taxId: document.getElementById('m-co-tax').value.trim()||undefined }) })
+        .then(function(c) {
+          App.companies.push(c);
+          closeModal();
+          renderAdmin();
+          toast('Empresa creada');
+        })
+        .catch(function(e) { toast(e.message||'Error al crear empresa','error'); });
+    }
+  );
+}
+
+function editCompany(id) {
+  var c = App.companies.find(function(x){ return x.id===id; });
+  if (!c) return;
+  openModal('Editar Empresa',
+    '<div class="form-group"><label>Nombre <span class="req">*</span></label><input id="m-co-name" class="form-control" maxlength="120" value="'+esc(c.name)+'"></div>'+
+    '<div class="form-group"><label>CUIT/CUIL</label><input id="m-co-tax" class="form-control" maxlength="30" value="'+esc(c.taxId||'')+'"></div>',
+    function() {
+      var name = (document.getElementById('m-co-name').value||'').trim();
+      if (!name) { toast('Nombre requerido','error'); return; }
+      return apiJson('/companies/'+id, { method:'PATCH', body: JSON.stringify({ name:name, taxId: document.getElementById('m-co-tax').value.trim()||undefined }) })
+        .then(function(updated) {
+          var idx = App.companies.findIndex(function(x){ return x.id===id; });
+          if (idx>=0) App.companies[idx] = updated;
+          closeModal();
+          renderAdmin();
+          toast('Empresa actualizada');
+        })
+        .catch(function(e) { toast(e.message||'Error al actualizar','error'); });
+    }
+  );
+}
+
+function toggleCompanyStatus(id, active) {
+  apiJson('/companies/'+id+'/status', { method:'PATCH', body: JSON.stringify({ active:active }) })
+    .then(function(updated) {
+      var idx = App.companies.findIndex(function(x){ return x.id===id; });
+      if (idx>=0) App.companies[idx] = updated;
+      renderAdmin();
+      toast('Estado actualizado');
+    })
+    .catch(function(e) { toast(e.message||'Error','error'); });
+}
+
+function adminAddUser() {
+  var user = UserStore ? UserStore.get() : null;
+  var roleOpts = user && user.role==='SUPER_ADMIN'
+    ? '<option value="USER">Usuario</option><option value="COMPANY_ADMIN">Admin Empresa</option><option value="SUPER_ADMIN">Super Admin</option>'
+    : '<option value="USER">Usuario</option><option value="COMPANY_ADMIN">Admin Empresa</option>';
+  var companyField = (user && user.role==='SUPER_ADMIN')
+    ? '<div class="form-group"><label>Empresa <span class="req">*</span></label><select id="m-us-company" class="form-control">'+
+      App.companies.map(function(c){ return '<option value="'+c.id+'">'+esc(c.name)+'</option>'; }).join('')+
+      '</select></div>'
+    : '';
+  openModal('Nuevo Usuario',
+    companyField+
+    '<div class="form-group"><label>Nombre <span class="req">*</span></label><input id="m-us-fname" class="form-control" maxlength="60"></div>'+
+    '<div class="form-group"><label>Apellido <span class="req">*</span></label><input id="m-us-lname" class="form-control" maxlength="60"></div>'+
+    '<div class="form-group"><label>Email <span class="req">*</span></label><input id="m-us-email" class="form-control" type="email"></div>'+
+    '<div class="form-group"><label>Contraseña <span class="req">*</span></label><input id="m-us-pwd" class="form-control" type="password" minlength="8"></div>'+
+    '<div class="form-group"><label>Rol</label><select id="m-us-role" class="form-control">'+roleOpts+'</select></div>',
+    function() {
+      var fname = (document.getElementById('m-us-fname').value||'').trim();
+      var lname = (document.getElementById('m-us-lname').value||'').trim();
+      var email = (document.getElementById('m-us-email').value||'').trim();
+      var pwd   = document.getElementById('m-us-pwd').value;
+      var role  = document.getElementById('m-us-role').value;
+      var coEl  = document.getElementById('m-us-company');
+      if (!fname||!lname||!email||!pwd) { toast('Completá todos los campos requeridos','error'); return; }
+      if (pwd.length<8) { toast('La contraseña debe tener al menos 8 caracteres','error'); return; }
+      var payload = { firstName:fname, lastName:lname, email:email, password:pwd, role:role };
+      if (coEl) payload.companyId = coEl.value;
+      return apiJson('/users', { method:'POST', body: JSON.stringify(payload) })
+        .then(function(u) {
+          App.adminUsers.push(u);
+          closeModal();
+          renderAdmin();
+          toast('Usuario creado');
+        })
+        .catch(function(e) { toast(e.message||'Error al crear usuario','error'); });
+    }
+  );
+}
+
+function adminEditUser(id) {
+  var u = App.adminUsers.find(function(x){ return x.id===id; });
+  if (!u) return;
+  openModal('Editar Usuario',
+    '<div class="form-group"><label>Nombre</label><input id="m-us-fname" class="form-control" maxlength="60" value="'+esc(u.firstName)+'"></div>'+
+    '<div class="form-group"><label>Apellido</label><input id="m-us-lname" class="form-control" maxlength="60" value="'+esc(u.lastName)+'"></div>'+
+    '<div class="form-group"><label>Email</label><input id="m-us-email" class="form-control" type="email" value="'+esc(u.email)+'"></div>',
+    function() {
+      var data = {};
+      var fname = (document.getElementById('m-us-fname').value||'').trim();
+      var lname = (document.getElementById('m-us-lname').value||'').trim();
+      var email = (document.getElementById('m-us-email').value||'').trim();
+      if (fname) data.firstName = fname;
+      if (lname) data.lastName = lname;
+      if (email) data.email = email;
+      return apiJson('/users/'+id, { method:'PATCH', body: JSON.stringify(data) })
+        .then(function(updated) {
+          var idx = App.adminUsers.findIndex(function(x){ return x.id===id; });
+          if (idx>=0) App.adminUsers[idx] = updated;
+          closeModal();
+          renderAdmin();
+          toast('Usuario actualizado');
+        })
+        .catch(function(e) { toast(e.message||'Error al actualizar','error'); });
+    }
+  );
+}
+
+function adminToggleUser(id, active) {
+  apiJson('/users/'+id+'/status', { method:'PATCH', body: JSON.stringify({ active:active }) })
+    .then(function(updated) {
+      var idx = App.adminUsers.findIndex(function(x){ return x.id===id; });
+      if (idx>=0) App.adminUsers[idx] = updated;
+      renderAdmin();
+      toast('Estado actualizado');
+    })
+    .catch(function(e) { toast(e.message||'Error','error'); });
+}
+
+function adminResetPwd(id) {
+  openModal('Restablecer Contraseña',
+    '<p style="margin:0 0 12px;font-size:13px;color:#64748b">Se establecerá una nueva contraseña para este usuario.</p>'+
+    '<div class="form-group"><label>Nueva contraseña <span class="req">*</span></label><input id="m-rst-pwd" class="form-control" type="password" minlength="8"></div>'+
+    '<div class="form-group"><label>Confirmar contraseña</label><input id="m-rst-pwd2" class="form-control" type="password" minlength="8"></div>',
+    function() {
+      var pwd  = document.getElementById('m-rst-pwd').value;
+      var pwd2 = document.getElementById('m-rst-pwd2').value;
+      if (!pwd||pwd.length<8) { toast('Mínimo 8 caracteres','error'); return; }
+      if (pwd!==pwd2) { toast('Las contraseñas no coinciden','error'); return; }
+      return apiJson('/users/'+id+'/reset-password', { method:'POST', body: JSON.stringify({ newPassword:pwd }) })
+        .then(function() { closeModal(); toast('Contraseña restablecida'); })
+        .catch(function(e) { toast(e.message||'Error','error'); });
+    }
+  );
+}
+
+function adminChangePassword() {
+  var current = (document.getElementById('adm-pwd-current')||{}).value;
+  var newPwd  = (document.getElementById('adm-pwd-new')||{}).value;
+  var confirm = (document.getElementById('adm-pwd-confirm')||{}).value;
+  var errEl   = document.getElementById('adm-pwd-error');
+  function setErr(msg){ if(errEl) errEl.textContent = msg||''; }
+  setErr('');
+  if (!current||!newPwd||!confirm) { setErr('Completá todos los campos'); return; }
+  if (newPwd.length<8) { setErr('La contraseña nueva debe tener al menos 8 caracteres'); return; }
+  if (newPwd!==confirm) { setErr('Las contraseñas no coinciden'); return; }
+  apiJson('/users/me/change-password', { method:'POST', body: JSON.stringify({ currentPassword:current, newPassword:newPwd }) })
+    .then(function() {
+      document.getElementById('adm-pwd-current').value='';
+      document.getElementById('adm-pwd-new').value='';
+      document.getElementById('adm-pwd-confirm').value='';
+      toast('Contraseña actualizada');
+    })
+    .catch(function(e) { setErr(e.message||'Error al cambiar la contraseña'); });
+}
+
 // ─── SEARCH ──────────────────────────────────────────────────
 function doSearch(q) {
   var dd=document.getElementById('search-results');
@@ -1683,6 +1964,15 @@ window.calNav       = calNav;
 window.buildReport  = buildReport;
 window.exportCSV    = exportCSV;
 window.filterHistory    = filterHistory;
+window.setAdminTab      = setAdminTab;
+window.addCompany       = addCompany;
+window.editCompany      = editCompany;
+window.toggleCompanyStatus = toggleCompanyStatus;
+window.adminAddUser     = adminAddUser;
+window.adminEditUser    = adminEditUser;
+window.adminToggleUser  = adminToggleUser;
+window.adminResetPwd    = adminResetPwd;
+window.adminChangePassword = adminChangePassword;
 window.closeSearch      = closeSearch;
 window.downloadTemplate  = downloadTemplate;
 window.triggerImportCSV  = triggerImportCSV;

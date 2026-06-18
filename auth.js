@@ -26,10 +26,15 @@ function updateUserInfo(user) {
   var avatarEl = document.getElementById('user-avatar');
   var nameEl   = document.getElementById('user-name');
   var roleEl   = document.getElementById('user-role');
-  var initial  = (user.name || user.email || 'U')[0].toUpperCase();
+  var fullName = (user.firstName && user.lastName)
+    ? user.firstName + ' ' + user.lastName
+    : (user.firstName || user.email || 'Usuario');
+  var initial  = fullName[0].toUpperCase();
   if (avatarEl) avatarEl.textContent = initial;
-  if (nameEl)   nameEl.textContent   = user.name || user.email || 'Usuario';
+  if (nameEl)   nameEl.textContent   = fullName;
   if (roleEl)   roleEl.textContent   = roleLabels[user.role] || 'Usuario';
+  var adminNav = document.getElementById('nav-admin');
+  if (adminNav) adminNav.style.display = isAdmin() ? '' : 'none';
 }
 
 function isAdmin() {

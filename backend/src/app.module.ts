@@ -12,6 +12,7 @@ import { DriversModule } from './drivers/drivers.module';
 import { ExpirationsModule } from './expirations/expirations.module';
 import { HazardousDocumentsModule } from './hazardous-documents/hazardous-documents.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
+import { CompaniesModule } from './companies/companies.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -22,6 +23,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     HealthModule,
     AuthModule,
     UsersModule,
+    CompaniesModule,
     VehiclesModule,
     DriversModule,
     ExpirationsModule,

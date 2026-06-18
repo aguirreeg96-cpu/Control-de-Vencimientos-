@@ -39,11 +39,6 @@ export class AuthController {
 
   @Get('me')
   me(@CurrentUser() user: JwtPayload) {
-    return {
-      id: user.sub,
-      email: user.email,
-      role: user.role,
-      companyId: user.companyId,
-    };
+    return this.authService.getMe(user.sub);
   }
 }

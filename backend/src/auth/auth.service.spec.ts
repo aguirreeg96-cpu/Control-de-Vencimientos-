@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
@@ -23,6 +23,8 @@ const MOCK_USER = {
   updatedAt: new Date(),
 };
 
+const MOCK_COMPANY = { active: true };
+
 const MOCK_REFRESH_TOKEN_RECORD = {
   id: 'token-record-uuid',
   userId: 'user-uuid',
@@ -41,7 +43,10 @@ function buildMocks() {
       update: jest.fn(),
       findUniqueOrThrow: jest.fn(),
     },
-    company: { create: jest.fn() },
+    company: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+    },
     refreshToken: {
       create: jest.fn(),
       findUnique: jest.fn(),
@@ -178,6 +183,7 @@ describe('AuthService', () => {
   // ── 5. login — credenciales correctas ─────────────────────────
   it('login: retorna tokens y usuario sin passwordHash', async () => {
     (prisma.user.findUnique as jest.Mock).mockResolvedValue(MOCK_USER);
+    (prisma.company.findUnique as jest.Mock).mockResolvedValue(MOCK_COMPANY);
     (prisma.user.update as jest.Mock).mockResolvedValue(MOCK_USER);
     (prisma.refreshToken.create as jest.Mock).mockResolvedValue(MOCK_REFRESH_TOKEN_RECORD);
     (jwt.signAsync as jest.Mock).mockResolvedValue('mock-access-token');
@@ -213,6 +219,7 @@ describe('AuthService', () => {
     (prisma.refreshToken.findUnique as jest.Mock).mockResolvedValue(MOCK_REFRESH_TOKEN_RECORD);
     (prisma.refreshToken.update as jest.Mock).mockResolvedValue({ ...MOCK_REFRESH_TOKEN_RECORD, revokedAt: new Date() });
     (prisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(MOCK_USER);
+    (prisma.company.findUnique as jest.Mock).mockResolvedValue(MOCK_COMPANY);
     (prisma.refreshToken.create as jest.Mock).mockResolvedValue(MOCK_REFRESH_TOKEN_RECORD);
     (jwt.signAsync as jest.Mock).mockResolvedValue('new-access-token');
     mockedArgon2.verify.mockResolvedValue(true as never);
@@ -249,5 +256,57 @@ describe('AuthService', () => {
   // ── 11. refresh — token con formato inválido ───────────────────
   it('refresh: lanza UnauthorizedException si el formato del token es inválido', async () => {
     await expect(service.refresh('tokensinpunto')).rejects.toThrow(UnauthorizedException);
+  });
+
+  // ── 12. login — usuario inactivo ──────────────────────────────
+  it('login: lanza UnauthorizedException si el usuario está inactivo', async () => {
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({ ...MOCK_USER, active: false });
+    mockedArgon2.verify.mockResolvedValue(true as never);
+
+    await expect(service.login({ email: 'juan@test.com', password: 'password123' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  // ── 13. login — empresa inactiva ──────────────────────────────
+  it('login: lanza ForbiddenException si la empresa está inactiva', async () => {
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue(MOCK_USER);
+    (prisma.company.findUnique as jest.Mock).mockResolvedValue({ active: false });
+    mockedArgon2.verify.mockResolvedValue(true as never);
+
+    await expect(service.login({ email: 'juan@test.com', password: 'password123' })).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  // ── 14. refresh — empresa inactiva ────────────────────────────
+  it('refresh: lanza ForbiddenException si la empresa del usuario está inactiva', async () => {
+    (prisma.refreshToken.findUnique as jest.Mock).mockResolvedValue(MOCK_REFRESH_TOKEN_RECORD);
+    (prisma.refreshToken.update as jest.Mock).mockResolvedValue({ ...MOCK_REFRESH_TOKEN_RECORD, revokedAt: new Date() });
+    (prisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(MOCK_USER);
+    (prisma.company.findUnique as jest.Mock).mockResolvedValue({ active: false });
+    mockedArgon2.verify.mockResolvedValue(true as never);
+
+    await expect(service.refresh('token-record-uuid.rawsecret')).rejects.toThrow(ForbiddenException);
+  });
+
+  // ── 15. getMe — retorna usuario sin passwordHash ──────────────
+  it('getMe: retorna datos del usuario desde la BD sin passwordHash', async () => {
+    const { passwordHash: _ph, ...safeUser } = MOCK_USER;
+    void _ph;
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue(safeUser);
+
+    const result = await service.getMe(MOCK_USER.id);
+
+    expect(result).not.toHaveProperty('passwordHash');
+    expect(result.email).toBe(MOCK_USER.email);
+    expect(result.firstName).toBe('Juan');
+  });
+
+  // ── 16. getMe — usuario no encontrado ─────────────────────────
+  it('getMe: lanza NotFoundException si el usuario no existe', async () => {
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+
+    await expect(service.getMe('non-existent-id')).rejects.toThrow(NotFoundException);
   });
 });
