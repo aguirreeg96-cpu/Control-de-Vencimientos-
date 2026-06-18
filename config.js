@@ -16,6 +16,6 @@
     // URL base de la API (sin barra final)
     API_BASE_URL: isLocal
       ? 'http://localhost:3000/api'
-      : 'https://REEMPLAZAR-CON-URL-DE-RENDER.onrender.com/api',
+      : 'https://control-de-vencimientos.onrender.com/api',
   };
 })();
