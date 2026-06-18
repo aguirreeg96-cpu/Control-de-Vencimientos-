@@ -8,7 +8,7 @@ const CATS = { vehicle:'Vehículo', driver:'Chofer', company:'Empresa', waste:'R
 
 // ─── STATE ───────────────────────────────────────────────────
 var App = {
-  vehicles: [], drivers: [], expirations: [], hazardous: [], history: [],
+  vehicles: [], drivers: [], expirations: [], hazardous: [], history: [], auditLogs: [],
   view: 'dashboard',
   calYear: new Date().getFullYear(),
   calMonth: new Date().getMonth(),
@@ -31,40 +31,64 @@ function dbLoad(k) { try { var r=localStorage.getItem(KEY+k); return r?JSON.pars
 function dbGet(k,def) { try { var r=localStorage.getItem(KEY+k); return r!==null?JSON.parse(r):def; } catch(e){ return def; } }
 
 function saveAll() {
-  dbSave('expirations', App.expirations);
-  dbSave('hazardous', App.hazardous);
   dbSave('history', App.history);
 }
 
 function loadAll() {
-  App.expirations = dbLoad('expirations');
-  App.hazardous   = dbLoad('hazardous');
-  App.history     = dbLoad('history');
+  App.history = dbLoad('history');
 }
 
 function loadApiData() {
-  return Promise.all([
+  return Promise.allSettled([
     apiJson('/vehicles?limit=100'),
-    apiJson('/drivers?limit=100')
+    apiJson('/drivers?limit=100'),
+    apiJson('/expirations?limit=200'),
+    apiJson('/hazardous-documents?limit=200'),
+    apiJson('/audit-logs?limit=200')
   ]).then(function(results) {
-    App.vehicles = results[0].data || [];
-    App.drivers  = results[1].data || [];
+    if(results[0].status==='fulfilled') App.vehicles = results[0].value.data || [];
+    else toast('Error al cargar vehículos','error');
+    if(results[1].status==='fulfilled') App.drivers = results[1].value.data || [];
+    else toast('Error al cargar choferes','error');
+    if(results[2].status==='fulfilled') App.expirations = (results[2].value.data||[]).map(normalizeExpiration);
+    else toast('Error al cargar vencimientos','error');
+    if(results[3].status==='fulfilled') App.hazardous = (results[3].value.data||[]).map(normalizeHazardous);
+    else toast('Error al cargar residuos peligrosos','error');
+    if(results[4].status==='fulfilled') App.auditLogs = results[4].value.data || [];
+    // audit-logs may fail for USER role — ignored silently
     checkLegacyData();
-  }).catch(function(err) {
-    toast('Error al cargar datos del servidor: ' + (err.message || ''), 'error');
   });
 }
 
 function checkLegacyData() {
-  var hasV = localStorage.getItem('lcp3_vehicles');
-  var hasD = localStorage.getItem('lcp3_drivers');
-  if (hasV || hasD) {
-    toast('Hay datos locales de vehículos/choferes sin migrar al servidor. Contacte al administrador.', 'warning');
-  }
+  var keys=['lcp3_vehicles','lcp3_drivers','lcp3_expirations','lcp3_hazardous'];
+  var hasAny=keys.some(function(k){return localStorage.getItem(k)!==null;});
+  if(hasAny) toast('Hay datos locales anteriores que todavía no fueron migrados al servidor.','warning');
 }
 
 // ─── UTILITIES ───────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
+
+// Category mapping: frontend (lowercase) ↔ API (uppercase)
+function catToApi(c){return {vehicle:'VEHICLE',driver:'DRIVER',company:'COMPANY',waste:'WASTE'}[c]||c.toUpperCase();}
+function catFromApi(c){return {VEHICLE:'vehicle',DRIVER:'driver',COMPANY:'company',WASTE:'waste'}[c]||(c||'').toLowerCase();}
+
+// Normalize ISO datetime string to YYYY-MM-DD (backend returns full timestamps)
+function normDate(s){if(!s)return null;return typeof s==='string'&&s.length>10?s.substring(0,10):s;}
+
+function normalizeExpiration(e){
+  return {id:e.id,type:e.type||'',category:catFromApi(e.category),
+    vehicleId:e.vehicleId||null,driverId:e.driverId||null,
+    issueDate:normDate(e.issueDate),expiryDate:normDate(e.expiryDate),
+    description:e.description||'',observations:e.observations||''};
+}
+
+function normalizeHazardous(h){
+  return {id:h.id,type:h.type||'',entityName:h.entityName||'',
+    permitNumber:h.permitNumber||'',issuingAuthority:h.issuingAuthority||'',
+    issueDate:normDate(h.issueDate),expiryDate:normDate(h.expiryDate),
+    observations:h.observations||''};
+}
 
 function today0() { var d=new Date(); d.setHours(0,0,0,0); return d; }
 
@@ -597,7 +621,6 @@ function delVehicle(id) {
     var idx=App.vehicles.findIndex(function(x){return x.id===id;});
     if(idx!==-1) App.vehicles[idx].active=false;
     App.expirations=App.expirations.filter(function(e){return e.vehicleId!==id;});
-    dbSave('expirations',App.expirations);
     toast('Vehículo dado de baja','warning'); renderVehicles(); updateBadges();
   }).catch(function(err){toast(err.message||'Error al dar de baja','error');});
 }
@@ -820,10 +843,10 @@ function expFormHtml(e) {
   var allTypes=['Seguro RC','VTV / RTO','Matafuegos','Habilitación Municipal','Verificación Técnica',
     'Tacógrafo','Licencia de Conducir','Psicofísico','ART','Curso Cargas Peligrosas',
     'Examen Médico','Habilitación Empresa','Póliza General','Habilitación SENASA','Otra'];
-  var vOpts='<option value="">— Sin vehículo —</option>'+App.vehicles.map(function(v){
+  var vOpts='<option value="">— Sin vehículo —</option>'+App.vehicles.filter(function(v){return v.active!==false;}).map(function(v){
     return '<option value="'+v.id+'"'+(e.vehicleId===v.id?' selected':'')+'>'+esc(v.patent)+' — '+esc(v.brand+' '+v.model)+'</option>';
   }).join('');
-  var dOpts='<option value="">— Sin chofer —</option>'+App.drivers.map(function(d){
+  var dOpts='<option value="">— Sin chofer —</option>'+App.drivers.filter(function(d){return d.active!==false;}).map(function(d){
     return '<option value="'+d.id+'"'+(e.driverId===d.id?' selected':'')+'>'+esc(d.name+' '+d.lastName)+'</option>';
   }).join('');
   var catOpts=Object.entries(CATS).map(function(c){return '<option value="'+c[0]+'"'+(e.category===c[0]?' selected':'')+'>'+c[1]+'</option>';}).join('');
@@ -847,15 +870,23 @@ function addExp() {
     var type=(document.getElementById('fe-type').value||'').trim();
     var expiry=document.getElementById('fe-expiry').value;
     if(!type||!expiry){toast('Complete tipo y fecha de vencimiento','error');return false;}
-    var e={id:uid(),type:type,category:document.getElementById('fe-cat').value,
-      vehicleId:document.getElementById('fe-vid').value||'',
-      driverId:document.getElementById('fe-did').value||'',
-      issueDate:document.getElementById('fe-issue').value,
-      expiryDate:expiry,observations:document.getElementById('fe-obs').value};
-    App.expirations.push(e);
-    dbSave('expirations',App.expirations);
-    addHistory('create','expiration',e.id,type,type+' registrado — vto. '+fmtDate(expiry));
-    toast('Vencimiento registrado'); closeModal(); renderExpirations(); updateBadges();
+    var cat=document.getElementById('fe-cat').value;
+    var vehicleId=document.getElementById('fe-vid').value||null;
+    var driverId=document.getElementById('fe-did').value||null;
+    if(cat==='vehicle'&&!vehicleId){toast('La categoría VEHÍCULO requiere un vehículo','error');return false;}
+    if(cat==='driver'&&!driverId){toast('La categoría CHOFER requiere un chofer','error');return false;}
+    if(cat==='company'&&(vehicleId||driverId)){toast('La categoría EMPRESA no puede tener vehículo ni chofer','error');return false;}
+    var body={type:type,category:catToApi(cat),expiryDate:expiry};
+    var issue=document.getElementById('fe-issue').value; if(issue) body.issueDate=issue;
+    if(vehicleId) body.vehicleId=vehicleId;
+    if(driverId) body.driverId=driverId;
+    var obs=document.getElementById('fe-obs').value; if(obs) body.observations=obs;
+    return apiJson('/expirations',{method:'POST',body:JSON.stringify(body)})
+    .then(function(e){
+      App.expirations.push(normalizeExpiration(e));
+      toast('Vencimiento registrado');
+      closeModal(); renderExpirations(); updateBadges();
+    }).catch(function(err){toast(err.message||'Error al guardar','error');});
   });
 }
 
@@ -867,15 +898,22 @@ function editExp(id) {
     var type=(document.getElementById('fe-type').value||'').trim();
     var expiry=document.getElementById('fe-expiry').value;
     if(!type||!expiry){toast('Complete tipo y fecha de vencimiento','error');return false;}
-    e.type=type; e.category=document.getElementById('fe-cat').value;
-    e.vehicleId=document.getElementById('fe-vid').value||'';
-    e.driverId=document.getElementById('fe-did').value||'';
-    e.issueDate=document.getElementById('fe-issue').value;
-    e.expiryDate=expiry;
-    e.observations=document.getElementById('fe-obs').value;
-    dbSave('expirations',App.expirations);
-    addHistory('update','expiration',id,type,type+' actualizado');
-    toast('Vencimiento actualizado'); closeModal(); renderExpirations(); updateBadges();
+    var cat=document.getElementById('fe-cat').value;
+    var vehicleId=document.getElementById('fe-vid').value||null;
+    var driverId=document.getElementById('fe-did').value||null;
+    if(cat==='vehicle'&&!vehicleId){toast('La categoría VEHÍCULO requiere un vehículo','error');return false;}
+    if(cat==='driver'&&!driverId){toast('La categoría CHOFER requiere un chofer','error');return false;}
+    if(cat==='company'&&(vehicleId||driverId)){toast('La categoría EMPRESA no puede tener vehículo ni chofer','error');return false;}
+    var body={type:type,category:catToApi(cat),vehicleId:vehicleId,driverId:driverId,expiryDate:expiry};
+    var issue=document.getElementById('fe-issue').value; if(issue) body.issueDate=issue;
+    body.observations=document.getElementById('fe-obs').value||null;
+    return apiJson('/expirations/'+id,{method:'PATCH',body:JSON.stringify(body)})
+    .then(function(updated){
+      var idx=App.expirations.findIndex(function(x){return x.id===id;});
+      if(idx!==-1) App.expirations[idx]=normalizeExpiration(updated);
+      toast('Vencimiento actualizado');
+      closeModal(); renderExpirations(); updateBadges();
+    }).catch(function(err){toast(err.message||'Error al actualizar','error');});
   });
 }
 
@@ -891,22 +929,29 @@ function renewExp(id) {
   openModal('Renovar Documento', html, function(){
     var newExpiry=document.getElementById('fr-expiry').value;
     if(!newExpiry){toast('Ingrese nueva fecha de vencimiento','error');return false;}
-    e.issueDate=document.getElementById('fr-issue').value;
-    e.expiryDate=newExpiry;
-    e.observations=document.getElementById('fr-obs').value;
-    dbSave('expirations',App.expirations);
-    addHistory('renew','expiration',id,e.type,e.type+' renovado — nuevo vto. '+fmtDate(newExpiry));
-    toast('Documento renovado'); closeModal(); renderExpirations(); updateBadges();
+    var body={
+      issueDate:document.getElementById('fr-issue').value||null,
+      expiryDate:newExpiry,
+      observations:document.getElementById('fr-obs').value||null
+    };
+    return apiJson('/expirations/'+id,{method:'PATCH',body:JSON.stringify(body)})
+    .then(function(updated){
+      var idx=App.expirations.findIndex(function(x){return x.id===id;});
+      if(idx!==-1) App.expirations[idx]=normalizeExpiration(updated);
+      toast('Documento renovado');
+      closeModal(); renderExpirations(); updateBadges();
+    }).catch(function(err){toast(err.message||'Error al renovar','error');});
   });
 }
 
 function delExp(id) {
   var e=App.expirations.find(function(x){return x.id===id;});
   if(!e||!confirm('¿Eliminar "'+e.type+'"?')) return;
-  App.expirations=App.expirations.filter(function(x){return x.id!==id;});
-  dbSave('expirations',App.expirations);
-  addHistory('delete','expiration',id,e.type,e.type+' eliminado');
-  toast('Vencimiento eliminado','warning'); renderExpirations(); updateBadges();
+  apiJson('/expirations/'+id,{method:'DELETE'})
+  .then(function(){
+    App.expirations=App.expirations.filter(function(x){return x.id!==id;});
+    toast('Vencimiento eliminado','warning'); renderExpirations(); updateBadges();
+  }).catch(function(err){toast(err.message||'Error al eliminar','error');});
 }
 
 // ─── CSV IMPORT ──────────────────────────────────────────────
@@ -1025,107 +1070,118 @@ function processImport(text) {
       '<p style="color:#ef4444;font-weight:700;margin-bottom:10px">Columnas obligatorias faltantes:</p>'+
       '<p style="font-family:monospace;background:#fee2e2;padding:8px;border-radius:6px;color:#b91c1c">'+esc(missing.join(', '))+'</p>'+
       '<p style="color:#64748b;font-size:13px;margin-top:12px">Usá el botón "Plantilla CSV" para descargar el formato correcto.</p>'+
-      '<p style="color:#64748b;font-size:12px;margin-top:6px">Columnas requeridas: <strong>tipo, fecha_vencimiento</strong></p>'+
-      '<p style="color:#64748b;font-size:12px">Opcionales: categoria, descripcion, vehiculo, chofer, fecha_emision, observaciones</p>'+
       '</div>', null);
     return;
   }
 
   function col(row,name){var idx=header.indexOf(name);return idx>=0?(row[idx]||'').trim():'';}
 
-  var imported=0, omitted=0, errors=[];
+  var toCreate=[], parseErrors=[];
   var dataRows=rows.slice(1).filter(function(r){return r.some(function(c){return c.trim();});});
 
   dataRows.forEach(function(row,i){
     var rowNum=i+2;
     var tipo=col(row,'tipo');
     var expStr=col(row,'fecha_vencimiento');
-
-    if(!tipo){errors.push('Fila '+rowNum+': campo "tipo" vacío');omitted++;return;}
-    if(!expStr){errors.push('Fila '+rowNum+': campo "fecha_vencimiento" vacío');omitted++;return;}
-
+    if(!tipo){parseErrors.push('Fila '+rowNum+': campo "tipo" vacío');return;}
+    if(!expStr){parseErrors.push('Fila '+rowNum+': campo "fecha_vencimiento" vacío');return;}
     var expiryDate=parseDateCSV(expStr);
-    if(!expiryDate){errors.push('Fila '+rowNum+': fecha_vencimiento inválida — "'+expStr+'" (usá DD/MM/AAAA o AAAA-MM-DD)');omitted++;return;}
+    if(!expiryDate){parseErrors.push('Fila '+rowNum+': fecha_vencimiento inválida — "'+expStr+'"');return;}
 
     var issueStr=col(row,'fecha_emision');
-    var issueDate=issueStr?parseDateCSV(issueStr):toISO(today0());
-    if(issueStr&&!issueDate){
-      errors.push('Fila '+rowNum+': fecha_emision inválida "'+issueStr+'" — se usa hoy');
-      issueDate=toISO(today0());
-    }
-    if(!issueDate) issueDate=toISO(today0());
+    var issueDate=issueStr?parseDateCSV(issueStr):null;
+    if(issueStr&&!issueDate) parseErrors.push('Fila '+rowNum+': fecha_emision inválida — se omite');
 
     var category=normalizeCat(col(row,'categoria'));
-    var vehicleId='', driverId='';
+    var vehicleId=null, driverId=null;
     var vStr=col(row,'vehiculo'), dStr=col(row,'chofer');
-
-    if(vStr){
-      var vFound=findVehicleByStr(vStr);
-      if(vFound===null) errors.push('Fila '+rowNum+': vehículo "'+vStr+'" no encontrado — se importa sin vehículo');
-      else vehicleId=vFound;
-    }
-    if(dStr){
-      var dFound=findDriverByStr(dStr);
-      if(dFound===null) errors.push('Fila '+rowNum+': chofer "'+dStr+'" no encontrado — se importa sin chofer');
-      else driverId=dFound;
-    }
+    if(vStr){var vf=findVehicleByStr(vStr);if(!vf)parseErrors.push('Fila '+rowNum+': vehículo "'+vStr+'" no encontrado — sin vehículo');else vehicleId=vf;}
+    if(dStr){var df=findDriverByStr(dStr);if(!df)parseErrors.push('Fila '+rowNum+': chofer "'+dStr+'" no encontrado — sin chofer');else driverId=df;}
 
     var dup=App.expirations.find(function(e){
-      return e.type.toLowerCase()===tipo.toLowerCase() &&
-             e.vehicleId===vehicleId && e.driverId===driverId &&
+      return e.type.toLowerCase()===tipo.toLowerCase()&&
+             (e.vehicleId||null)===(vehicleId||null)&&
+             (e.driverId||null)===(driverId||null)&&
              e.expiryDate===expiryDate;
     });
-    if(dup){errors.push('Fila '+rowNum+': duplicado — "'+tipo+'" ya existe con la misma entidad y fecha');omitted++;return;}
+    if(dup){parseErrors.push('Fila '+rowNum+': duplicado — "'+tipo+'" ya existe');return;}
 
-    App.expirations.push({
-      id:uid(), type:tipo, category:category,
-      vehicleId:vehicleId, driverId:driverId,
-      issueDate:issueDate, expiryDate:expiryDate,
-      description:col(row,'descripcion'),
-      observations:col(row,'observaciones')
-    });
-    imported++;
+    var body={type:tipo,category:catToApi(category),expiryDate:expiryDate};
+    if(vehicleId) body.vehicleId=vehicleId;
+    if(driverId) body.driverId=driverId;
+    if(issueDate) body.issueDate=issueDate;
+    var desc=col(row,'descripcion'); if(desc) body.description=desc;
+    var obs=col(row,'observaciones'); if(obs) body.observations=obs;
+    toCreate.push(body);
   });
 
-  if(imported>0){
-    dbSave('expirations',App.expirations);
-    addHistory('create','expiration','bulk','Importación CSV',
-      'Importación masiva: '+imported+' vencimientos importados');
+  if(!toCreate.length) {
+    openModal('Sin registros para importar',
+      '<div style="padding:16px"><p style="color:#475569">No se encontraron registros válidos para importar.</p>'+
+      (parseErrors.length?'<div style="margin-top:12px;background:#fef9c3;border-radius:8px;padding:10px;max-height:140px;overflow-y:auto">'+
+      '<ul style="margin:0;padding-left:18px;font-size:12px;color:#713f12">'+parseErrors.slice(0,15).map(function(e){return '<li>'+esc(e)+'</li>';}).join('')+'</ul></div>':'')+
+      '</div>', null);
+    return;
   }
 
-  var total=dataRows.length;
-  var summaryHtml=
-    '<div style="padding:4px 0">'+
-    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">'+
-    '<div style="background:#dcfce7;border-radius:10px;padding:16px;text-align:center">'+
-      '<div style="font-size:34px;font-weight:800;color:#15803d">'+imported+'</div>'+
-      '<div style="font-size:12px;color:#166534;font-weight:600;margin-top:4px">Importados</div></div>'+
-    '<div style="background:#fee2e2;border-radius:10px;padding:16px;text-align:center">'+
-      '<div style="font-size:34px;font-weight:800;color:#b91c1c">'+omitted+'</div>'+
-      '<div style="font-size:12px;color:#991b1b;font-weight:600;margin-top:4px">Omitidos</div></div>'+
-    '<div style="background:#f1f5f9;border-radius:10px;padding:16px;text-align:center">'+
-      '<div style="font-size:34px;font-weight:800;color:#475569">'+total+'</div>'+
-      '<div style="font-size:12px;color:#64748b;font-weight:600;margin-top:4px">Filas procesadas</div></div>'+
-    '</div>';
+  var omitted=dataRows.length-toCreate.length;
+  var previewHtml='<div style="padding:4px">'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">'+
+    '<div style="background:#dbeafe;border-radius:8px;padding:14px;text-align:center">'+
+    '<div style="font-size:28px;font-weight:800;color:#1d4ed8">'+toCreate.length+'</div>'+
+    '<div style="font-size:12px;color:#1e40af;font-weight:600">A crear</div></div>'+
+    '<div style="background:#fee2e2;border-radius:8px;padding:14px;text-align:center">'+
+    '<div style="font-size:28px;font-weight:800;color:#b91c1c">'+omitted+'</div>'+
+    '<div style="font-size:12px;color:#991b1b;font-weight:600">Omitidos</div></div></div>'+
+    (parseErrors.length?'<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:12px;max-height:120px;overflow-y:auto">'+
+    '<ul style="margin:0;padding-left:18px;font-size:11px;color:#713f12">'+parseErrors.slice(0,15).map(function(e){return '<li>'+esc(e)+'</li>';}).join('')+
+    (parseErrors.length>15?'<li>...y '+(parseErrors.length-15)+' más</li>':'')+'</ul></div>':'')+
+    '<p style="font-size:13px;color:#475569">Hacé clic en <strong>Guardar</strong> para importar los '+toCreate.length+' registros vía API.</p></div>';
 
-  if(errors.length){
-    summaryHtml+=
-      '<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:12px;margin-bottom:14px">'+
-      '<div style="font-size:12px;font-weight:700;color:#854d0e;margin-bottom:6px">Avisos ('+errors.length+')</div>'+
-      '<div style="max-height:150px;overflow-y:auto"><ul style="margin:0;padding-left:18px;font-size:12px;color:#713f12">'+
-      errors.slice(0,25).map(function(e){return '<li style="margin-bottom:3px">'+esc(e)+'</li>';}).join('')+
-      (errors.length>25?'<li style="color:#94a3b8">...y '+(errors.length-25)+' avisos más</li>':'')+
-      '</ul></div></div>';
-  }
+  openModal('Importar Vencimientos', previewHtml, function(){
+    var bodyEl=document.getElementById('modal-body');
+    var imported=0, failed=0, apiErrors=[];
 
-  summaryHtml+=(imported>0
-    ?'<p style="font-size:13px;color:#15803d;font-weight:600">✓ Los vencimientos ya están disponibles en la tabla y el dashboard.</p>'
-    :'<p style="font-size:13px;color:#ef4444;font-weight:600">No se importó ningún registro. Revisá el archivo y los avisos.</p>')+'</div>';
+    function next(i) {
+      if(i>=toCreate.length) {
+        return apiJson('/expirations?limit=200').then(function(resp){
+          App.expirations=(resp.data||[]).map(normalizeExpiration);
+          renderExpirations(); updateBadges();
+          var summaryHtml='<div style="padding:4px">'+
+            '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">'+
+            '<div style="background:#dcfce7;border-radius:10px;padding:16px;text-align:center">'+
+            '<div style="font-size:34px;font-weight:800;color:#15803d">'+imported+'</div>'+
+            '<div style="font-size:12px;color:#166534;font-weight:600;margin-top:4px">Importados</div></div>'+
+            '<div style="background:#fee2e2;border-radius:10px;padding:16px;text-align:center">'+
+            '<div style="font-size:34px;font-weight:800;color:#b91c1c">'+failed+'</div>'+
+            '<div style="font-size:12px;color:#991b1b;font-weight:600;margin-top:4px">Fallidos</div></div>'+
+            '<div style="background:#f1f5f9;border-radius:10px;padding:16px;text-align:center">'+
+            '<div style="font-size:34px;font-weight:800;color:#475569">'+toCreate.length+'</div>'+
+            '<div style="font-size:12px;color:#64748b;font-weight:600;margin-top:4px">Procesados</div></div></div>'+
+            (apiErrors.length?'<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px;max-height:100px;overflow-y:auto">'+
+            '<ul style="margin:0;padding-left:18px;font-size:11px;color:#713f12">'+apiErrors.slice(0,15).map(function(e){return '<li>'+esc(e)+'</li>';}).join('')+'</ul></div>':'')+
+            '<p style="font-size:13px;font-weight:600;margin-top:12px;color:'+(imported>0?'#15803d':'#ef4444')+'">'+
+            (imported>0?'✓ '+imported+' vencimientos importados correctamente.':'No se importó ningún registro.')+'</p></div>';
+          if(bodyEl) bodyEl.innerHTML=summaryHtml;
+          var saveBtn=document.getElementById('modal-save');
+          if(saveBtn){saveBtn.textContent='Cerrar';saveBtn.disabled=false;App.modalCb=function(){closeModal();};}
+          toast(imported>0?imported+' registros importados':'Sin registros importados',imported>0?'success':'warning');
+        }).catch(function(){});
+      }
+      if(bodyEl){
+        bodyEl.innerHTML='<div style="padding:30px;text-align:center">'+
+          '<div style="font-size:14px;color:#475569">Importando '+(i+1)+' de '+toCreate.length+'...</div>'+
+          '<div style="margin-top:10px;background:#e2e8f0;border-radius:4px;height:8px">'+
+          '<div style="background:#2563eb;height:8px;border-radius:4px;width:'+Math.round(i/toCreate.length*100)+'%"></div></div></div>';
+      }
+      return apiJson('/expirations',{method:'POST',body:JSON.stringify(toCreate[i])})
+      .then(function(){imported++;})
+      .catch(function(err){failed++;apiErrors.push('Item '+(i+1)+': '+(err.message||'Error'));})
+      .then(function(){return next(i+1);});
+    }
 
-  // Update data BEFORE showing modal so table is ready
-  if(imported>0){renderExpirations();updateBadges();}
-  openModal('Resultado de Importación',summaryHtml,null);
-  toast(imported>0?imported+' registros importados':'Sin registros importados',imported>0?'success':'warning');
+    return next(0);
+  });
 }
 
 // ─── HAZARDOUS ───────────────────────────────────────────────
@@ -1145,7 +1201,7 @@ function renderHazardous() {
       '<td><span class="badge badge-'+s+'">'+statusLabel(s)+'</span></td>'+
       '<td><div class="action-btns">'+
       '<button class="btn-icon" onclick="editHaz(\''+h.id+'\')" title="Editar">'+editIcon()+'</button>'+
-      '<button class="btn-icon danger" onclick="delHaz(\''+h.id+'\')" title="Eliminar">'+delIcon()+'</button>'+
+      (isAdmin()?'<button class="btn-icon danger" onclick="delHaz(\''+h.id+'\')" title="Eliminar">'+delIcon()+'</button>':'')+
       '</div></td></tr>';
   }).join('');
 
@@ -1178,15 +1234,17 @@ function addHaz() {
     var type=document.getElementById('fh-type').value;
     var expiry=document.getElementById('fh-expiry').value;
     if(!expiry){toast('Ingrese la fecha de vencimiento','error');return false;}
-    var h={id:uid(),type:type,entityName:document.getElementById('fh-entity').value.trim(),
-      permitNumber:document.getElementById('fh-permit').value.trim(),
-      issuingAuthority:document.getElementById('fh-auth').value.trim(),
-      issueDate:document.getElementById('fh-issue').value,
-      expiryDate:expiry,observations:document.getElementById('fh-obs').value};
-    App.hazardous.push(h);
-    dbSave('hazardous',App.hazardous);
-    addHistory('create','waste',h.id,type,type+' registrado');
-    toast('Registro agregado'); closeModal(); renderHazardous(); updateBadges();
+    var body={type:type,entityName:document.getElementById('fh-entity').value.trim(),
+      permitNumber:document.getElementById('fh-permit').value.trim()||undefined,
+      issuingAuthority:document.getElementById('fh-auth').value.trim()||undefined,
+      issueDate:document.getElementById('fh-issue').value||undefined,
+      expiryDate:expiry,
+      observations:document.getElementById('fh-obs').value||undefined};
+    return apiJson('/hazardous-documents',{method:'POST',body:JSON.stringify(body)})
+    .then(function(h){
+      App.hazardous.push(normalizeHazardous(h));
+      toast('Registro agregado'); closeModal(); renderHazardous(); updateBadges();
+    }).catch(function(err){toast(err.message||'Error al guardar','error');});
   });
 }
 
@@ -1196,26 +1254,31 @@ function editHaz(id) {
   openModal('Editar Registro', hazFormHtml(h), function(){
     var expiry=document.getElementById('fh-expiry').value;
     if(!expiry){toast('Ingrese la fecha de vencimiento','error');return false;}
-    h.type=document.getElementById('fh-type').value;
-    h.entityName=document.getElementById('fh-entity').value.trim();
-    h.permitNumber=document.getElementById('fh-permit').value.trim();
-    h.issuingAuthority=document.getElementById('fh-auth').value.trim();
-    h.issueDate=document.getElementById('fh-issue').value;
-    h.expiryDate=expiry;
-    h.observations=document.getElementById('fh-obs').value;
-    dbSave('hazardous',App.hazardous);
-    addHistory('update','waste',id,h.type,h.type+' actualizado');
-    toast('Registro actualizado'); closeModal(); renderHazardous(); updateBadges();
+    var body={type:document.getElementById('fh-type').value,
+      entityName:document.getElementById('fh-entity').value.trim(),
+      permitNumber:document.getElementById('fh-permit').value.trim()||null,
+      issuingAuthority:document.getElementById('fh-auth').value.trim()||null,
+      issueDate:document.getElementById('fh-issue').value||null,
+      expiryDate:expiry,
+      observations:document.getElementById('fh-obs').value||null};
+    return apiJson('/hazardous-documents/'+id,{method:'PATCH',body:JSON.stringify(body)})
+    .then(function(updated){
+      var idx=App.hazardous.findIndex(function(x){return x.id===id;});
+      if(idx!==-1) App.hazardous[idx]=normalizeHazardous(updated);
+      toast('Registro actualizado'); closeModal(); renderHazardous(); updateBadges();
+    }).catch(function(err){toast(err.message||'Error al actualizar','error');});
   });
 }
 
 function delHaz(id) {
+  if(!isAdmin()){toast('Sin permisos para eliminar','error');return;}
   var h=App.hazardous.find(function(x){return x.id===id;});
   if(!h||!confirm('¿Eliminar "'+h.type+'"?')) return;
-  App.hazardous=App.hazardous.filter(function(x){return x.id!==id;});
-  dbSave('hazardous',App.hazardous);
-  addHistory('delete','waste',id,h.type,h.type+' eliminado');
-  toast('Registro eliminado','warning'); renderHazardous();
+  apiJson('/hazardous-documents/'+id,{method:'DELETE'})
+  .then(function(){
+    App.hazardous=App.hazardous.filter(function(x){return x.id!==id;});
+    toast('Registro eliminado','warning'); renderHazardous(); updateBadges();
+  }).catch(function(err){toast(err.message||'Error al eliminar','error');});
 }
 
 // ─── CALENDAR ────────────────────────────────────────────────
@@ -1308,7 +1371,7 @@ function renderReports() {
     '<input type="file" id="backup-import-input" accept=".json" style="display:none" onchange="importBackup(this)">'+
     '</div>'+
     '<p style="color:#94a3b8;font-size:12px;margin-top:10px">'+
-    'El backup incluye todos tus vehículos, choferes, vencimientos, residuos e historial. El archivo es de tipo <strong>.json</strong> y solo lo lee esta aplicación.</p>'+
+    'El backup exporta el historial local. Los datos del servidor (vehículos, choferes, vencimientos, residuos) se gestionan en la base de datos. El archivo es de tipo <strong>.json</strong> y solo lo lee esta aplicación.</p>'+
     '</div>';
   buildReport();
 }
@@ -1368,13 +1431,10 @@ function exportCSV(fmt) {
 
 function exportBackup() {
   var backup = {
-    version: '1',
+    version: '2',
     app: 'LOGICONTROL PRO',
     exportedAt: new Date().toISOString(),
-    vehicles: App.vehicles,
-    drivers: App.drivers,
-    expirations: App.expirations,
-    hazardous: App.hazardous,
+    note: 'Vehicles, drivers, expirations and hazardous docs are stored on the server. This backup contains local history only.',
     history: App.history
   };
   var json = JSON.stringify(backup, null, 2);
@@ -1385,7 +1445,7 @@ function exportBackup() {
   a.download = 'logicontrol-backup-' + toISO(today0()) + '.json';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast('Backup exportado — ' + App.expirations.length + ' vencimientos, ' + App.vehicles.length + ' vehículos');
+  toast('Backup exportado — historial local ('+App.history.length+' registros)');
 }
 
 function triggerImportBackup() {
@@ -1404,24 +1464,19 @@ function importBackup(input) {
     try { data = JSON.parse(ev.target.result); } catch(e) {
       toast('El archivo no es un backup válido', 'error'); return;
     }
-    if (!Array.isArray(data.vehicles) || !Array.isArray(data.expirations)) {
+    if (!data.app || data.app !== 'LOGICONTROL PRO') {
       toast('Archivo de backup inválido o corrupto', 'error'); return;
     }
-    var msg = 'Restaurar backup del ' + fmtDate(data.exportedAt ? data.exportedAt.split('T')[0] : '') + '?\n\n' +
-      '• ' + (data.vehicles||[]).length + ' vehículos\n' +
-      '• ' + (data.drivers||[]).length + ' choferes\n' +
-      '• ' + (data.expirations||[]).length + ' vencimientos\n\n' +
-      'ATENCIÓN: se reemplazarán todos los datos actuales.';
+    var historyCount = Array.isArray(data.history) ? data.history.length : 0;
+    var msg = 'Restaurar historial local del backup del ' +
+      fmtDate(data.exportedAt ? data.exportedAt.split('T')[0] : '') + '?\n\n' +
+      '• ' + historyCount + ' registros de historial local\n\n' +
+      'NOTA: Los datos del servidor (vehículos, choferes, vencimientos) no se modifican.';
     if (!confirm(msg)) return;
-    App.vehicles    = data.vehicles    || [];
-    App.drivers     = data.drivers     || [];
-    App.expirations = data.expirations || [];
-    App.hazardous   = data.hazardous   || [];
-    App.history     = data.history     || [];
+    App.history = data.history || [];
     saveAll();
-    renderView(App.view);
-    updateBadges();
-    toast('Backup restaurado — ' + App.expirations.length + ' vencimientos cargados');
+    if (App.view === 'history') renderView('history');
+    toast('Historial local restaurado — ' + App.history.length + ' registros');
   };
   reader.onerror = function() { toast('Error al leer el archivo', 'error'); };
   reader.readAsText(file, 'UTF-8');
@@ -1431,30 +1486,56 @@ function importBackup(input) {
 function renderHistory() {
   var el=document.getElementById('view-history');
   if(!el) return;
+
+  if(!isAdmin()){
+    el.innerHTML=
+      '<div class="page-header"><div><div class="page-title">Historial de Actividad</div>'+
+      '<div class="page-subtitle">Registro de operaciones del sistema</div></div></div>'+
+      '<div class="empty-state"><div class="empty-state-title">Sin permisos</div>'+
+      '<div class="empty-state-desc">Solo los administradores pueden ver el historial de actividad.</div></div>';
+    return;
+  }
+
+  var actionLbl={CREATE:'Alta',UPDATE:'Modificación',DELETE:'Baja',RENEW:'Renovación'};
+  var actionBg={CREATE:'#dcfce7',UPDATE:'#dbeafe',DELETE:'#fee2e2',RENEW:'#fef9c3'};
+  var actionTxt={CREATE:'#15803d',UPDATE:'#1d4ed8',DELETE:'#b91c1c',RENEW:'#854d0e'};
+
   var q=(App.historySearch||'').toLowerCase();
-  var data=q?App.history.filter(function(h){
-    return h.description.toLowerCase().includes(q)||h.entityName.toLowerCase().includes(q);
-  }):App.history;
-  var actionLbl={create:'Alta',update:'Modificación',delete:'Baja',renew:'Renovación'};
-  var actionBg={create:'#dcfce7',update:'#dbeafe',delete:'#fee2e2',renew:'#fef9c3'};
-  var actionTxt={create:'#15803d',update:'#1d4ed8',delete:'#b91c1c',renew:'#854d0e'};
+  var data=App.auditLogs;
+  if(q) data=data.filter(function(h){
+    return (h.action||'').toLowerCase().includes(q)||
+           (h.entityType||'').toLowerCase().includes(q)||
+           (h.entityId||'').toLowerCase().includes(q)||
+           (h.metadata&&JSON.stringify(h.metadata).toLowerCase().includes(q));
+  });
+
+  var legacyBanner=App.history.length>0?
+    '<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#854d0e">'+
+    '<strong>Aviso:</strong> Hay '+App.history.length+' registros del historial local anterior. Estos no se muestran aquí y no se eliminan automáticamente.</div>':
+    '';
+
   var items=data.length?data.map(function(h){
-    var bg=actionBg[h.action]||'#f1f5f9', tc=actionTxt[h.action]||'#475569';
+    var act=(h.action||'').toUpperCase();
+    var bg=actionBg[act]||'#f1f5f9', tc=actionTxt[act]||'#475569';
+    var lbl=actionLbl[act]||h.action||'—';
+    var meta=h.metadata&&h.metadata.userEmail?'<span style="font-size:11px;color:#94a3b8"> · '+esc(h.metadata.userEmail)+'</span>':'';
+    var desc=esc(h.entityType||'')+(h.entityId?' #'+esc(String(h.entityId).slice(0,8)):'');
     return '<div class="history-item">'+
       '<div class="history-icon">'+
       '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="#2563eb" stroke-width="1.4"/><path d="M8 5v3l2 2" stroke="#2563eb" stroke-width="1.4" stroke-linecap="round"/></svg>'+
       '</div>'+
       '<div class="history-content">'+
-      '<div class="history-action">'+esc(h.description)+'</div>'+
+      '<div class="history-action">'+desc+meta+'</div>'+
       '<div class="history-meta">'+
-      '<span class="history-type-badge" style="background:'+bg+';color:'+tc+'">'+( actionLbl[h.action]||h.action)+'</span>'+
-      '<span class="history-time">'+fmtDT(h.timestamp)+'</span>'+
+      '<span class="history-type-badge" style="background:'+bg+';color:'+tc+'">'+lbl+'</span>'+
+      '<span class="history-time">'+fmtDT(h.createdAt||h.timestamp)+'</span>'+
       '</div></div></div>';
   }).join(''):'<div class="empty-state"><div class="empty-state-title">Sin actividad registrada</div></div>';
 
   el.innerHTML=
     '<div class="page-header"><div><div class="page-title">Historial de Actividad</div>'+
-    '<div class="page-subtitle">'+App.history.length+' registros de actividad</div></div></div>'+
+    '<div class="page-subtitle">'+App.auditLogs.length+' registros del servidor</div></div></div>'+
+    legacyBanner+
     '<div class="filter-row"><input type="text" class="filter-input" placeholder="Buscar en historial..." value="'+esc(App.historySearch||'')+'" oninput="filterHistory(this.value)"></div>'+
     '<div class="history-list">'+items+'</div>';
 }
@@ -1472,8 +1553,8 @@ function doSearch(q) {
     return (v.patent||'').toLowerCase().includes(q)||(v.brand||'').toLowerCase().includes(q)||(v.model||'').toLowerCase().includes(q);
   }).slice(0,4).forEach(function(v){results.push({type:'vehicles',label:v.patent,sub:v.brand+' '+v.model});});
   App.drivers.filter(function(d){
-    return (d.name+' '+d.lastName).toLowerCase().includes(q)||d.dni.includes(q);
-  }).slice(0,4).forEach(function(d){results.push({type:'drivers',label:d.name+' '+d.lastName,sub:'DNI '+d.dni});});
+    return (d.name+' '+d.lastName).toLowerCase().includes(q)||(d.dni||'').includes(q);
+  }).slice(0,4).forEach(function(d){results.push({type:'drivers',label:d.name+' '+d.lastName,sub:'DNI '+(d.dni||'')});});
   App.expirations.filter(function(e){
     return (e.type||'').toLowerCase().includes(q);
   }).slice(0,4).forEach(function(e){results.push({type:'expirations',label:e.type,sub:CATS[e.category]||'Doc' +' · '+fmtDate(e.expiryDate)});});
