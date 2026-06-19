@@ -525,6 +525,7 @@ function renderVehicles() {
       '<td>'+v.year+'</td><td>'+esc(dn)+'</td><td>'+docInfo+'</td>'+
       '<td><span class="badge '+sc+'">'+sl+'</span></td>'+
       '<td><div class="action-btns">'+
+      '<button class="btn-icon" onclick="showAttachmentsModal(\'VEHICLE\',\''+v.id+'\',\''+esc(v.patent)+'\')" title="Archivos adjuntos" style="color:#8b5cf6">'+attachClipIcon()+'</button>'+
       '<button class="btn-icon" onclick="editVehicle(\''+v.id+'\')" title="Editar">'+editIcon()+'</button>'+
       (isAdmin()?'<button class="btn-icon danger" onclick="delVehicle(\''+v.id+'\')" title="Dar de baja">'+delIcon()+'</button>':'')+
       '</div></td></tr>';
@@ -672,6 +673,7 @@ function renderDrivers() {
       '<td>'+docCell(d.id,'ART')+'</td>'+
       '<td><span class="badge '+sc+'">'+sl+'</span></td>'+
       '<td><div class="action-btns">'+
+      '<button class="btn-icon" onclick="showAttachmentsModal(\'DRIVER\',\''+d.id+'\',\''+esc(d.name+' '+d.lastName)+'\')" title="Archivos adjuntos" style="color:#8b5cf6">'+attachClipIcon()+'</button>'+
       '<button class="btn-icon" onclick="editDriver(\''+d.id+'\')" title="Editar">'+editIcon()+'</button>'+
       (isAdmin()?'<button class="btn-icon danger" onclick="delDriver(\''+d.id+'\')" title="Dar de baja">'+delIcon()+'</button>':'')+
       '</div></td></tr>';
@@ -805,6 +807,7 @@ function renderExpirations() {
       '<td><span style="font-weight:700;color:'+statusColor(s)+'">'+dText+'</span></td>'+
       '<td><span class="badge badge-'+s+'">'+statusLabel(s)+'</span></td>'+
       '<td><div class="action-btns">'+
+      '<button class="btn-icon" onclick="showAttachmentsModal(\'EXPIRATION\',\''+e.id+'\',\''+esc(e.type)+'\')" title="Archivos adjuntos" style="color:#8b5cf6">'+attachClipIcon()+'</button>'+
       '<button class="btn-icon" style="color:#22c55e" onclick="renewExp(\''+e.id+'\')" title="Renovar">'+renewIcon()+'</button>'+
       '<button class="btn-icon" onclick="editExp(\''+e.id+'\')" title="Editar">'+editIcon()+'</button>'+
       '<button class="btn-icon danger" onclick="delExp(\''+e.id+'\')" title="Eliminar">'+delIcon()+'</button>'+
@@ -1206,6 +1209,7 @@ function renderHazardous() {
       '<td><span style="font-weight:700;color:'+statusColor(s)+'">'+dText+'</span></td>'+
       '<td><span class="badge badge-'+s+'">'+statusLabel(s)+'</span></td>'+
       '<td><div class="action-btns">'+
+      '<button class="btn-icon" onclick="showAttachmentsModal(\'HAZARDOUS_DOCUMENT\',\''+h.id+'\',\''+esc(h.type)+'\')" title="Archivos adjuntos" style="color:#8b5cf6">'+attachClipIcon()+'</button>'+
       '<button class="btn-icon" onclick="editHaz(\''+h.id+'\')" title="Editar">'+editIcon()+'</button>'+
       (isAdmin()?'<button class="btn-icon danger" onclick="delHaz(\''+h.id+'\')" title="Eliminar">'+delIcon()+'</button>':'')+
       '</div></td></tr>';
@@ -1939,6 +1943,130 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 });
 
+// ─── ATTACHMENTS ─────────────────────────────────────────────
+
+var attachClipIcon = function() {
+  return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+};
+
+function showAttachmentsModal(entityType, entityId, entityName) {
+  var modalHtml =
+    '<div id="att-modal-body">' +
+    '<div style="margin-bottom:12px;font-size:13px;color:#64748b">Archivos adjuntos para <strong>' + esc(entityName) + '</strong></div>' +
+    '<div id="att-list" style="margin-bottom:16px;min-height:40px"><div style="color:#94a3b8;font-size:13px">Cargando...</div></div>' +
+    (isAdmin()
+      ? '<div style="border-top:1px solid #e2e8f0;padding-top:14px">' +
+        '<div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Subir archivo</div>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<label style="flex:1;min-width:0"><input type="file" id="att-file-input" accept=".pdf,.jpg,.jpeg,.png,.webp" style="display:none" onchange="attFileSelected(this,\''+entityType+'\',\''+entityId+'\')">'+
+        '<button class="btn-ghost" style="width:100%;justify-content:center" onclick="document.getElementById(\'att-file-input\').click()">' + attachClipIcon() + ' Seleccionar archivo</button></label>' +
+        '</div>' +
+        '<div id="att-upload-info" style="margin-top:6px;font-size:12px;color:#94a3b8">PDF, JPG, PNG, WEBP · máx 10 MB · máx 10 archivos</div>' +
+        '</div>'
+      : '') +
+    '</div>';
+
+  openModal('Archivos adjuntos', modalHtml, null);
+  loadAttachmentList(entityType, entityId);
+}
+
+function loadAttachmentList(entityType, entityId) {
+  var listEl = document.getElementById('att-list');
+  if (!listEl) return;
+  apiJson('/attachments?entityType=' + entityType + '&entityId=' + entityId)
+    .then(function(res) {
+      if (!listEl) return;
+      if (!res.data || res.data.length === 0) {
+        listEl.innerHTML = '<div style="color:#94a3b8;font-size:13px;padding:8px 0">Sin archivos adjuntos</div>';
+        return;
+      }
+      listEl.innerHTML = res.data.map(function(a) {
+        var fileIcon = a.mimeType === 'application/pdf'
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
+          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+        var sizeKb = Math.ceil(a.sizeBytes / 1024);
+        var date = a.createdAt ? new Date(a.createdAt).toLocaleDateString('es-AR') : '';
+        return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f8fafc;border-radius:8px;margin-bottom:6px">' +
+          '<span>' + fileIcon + '</span>' +
+          '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(a.originalName) + '">' + esc(a.originalName) + '</div>' +
+          '<div style="font-size:11px;color:#94a3b8">' + sizeKb + ' KB · ' + date + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:4px;flex-shrink:0">' +
+          '<button class="btn-icon" onclick="viewAttachment(\'' + a.id + '\')" title="Ver / Descargar" style="color:#3b82f6"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>' +
+          (isAdmin()
+            ? '<button class="btn-icon" onclick="replaceAttachment(\'' + a.id + '\',\'' + entityType + '\',\'' + entityId + '\')" title="Reemplazar" style="color:#f59e0b">' + editIcon() + '</button>' +
+              '<button class="btn-icon danger" onclick="deleteAttachment(\'' + a.id + '\',\'' + entityType + '\',\'' + entityId + '\')" title="Eliminar">' + delIcon() + '</button>'
+            : '') +
+          '</div>' +
+          '</div>';
+      }).join('');
+    })
+    .catch(function(err) {
+      if (listEl) listEl.innerHTML = '<div style="color:#ef4444;font-size:13px">Error al cargar archivos: ' + esc(err.message) + '</div>';
+    });
+}
+
+function attFileSelected(input, entityType, entityId) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  var infoEl = document.getElementById('att-upload-info');
+  if (infoEl) infoEl.textContent = 'Subiendo "' + file.name + '"...';
+  var fd = new FormData();
+  fd.append('file', file);
+  fd.append('entityType', entityType);
+  fd.append('entityId', entityId);
+  apiFormData('/attachments', fd)
+    .then(function() {
+      toast('Archivo subido correctamente');
+      if (infoEl) infoEl.textContent = 'PDF, JPG, PNG, WEBP · máx 10 MB · máx 10 archivos';
+      input.value = '';
+      loadAttachmentList(entityType, entityId);
+    })
+    .catch(function(err) {
+      toast(err.message || 'Error al subir archivo', 'error');
+      if (infoEl) infoEl.textContent = 'PDF, JPG, PNG, WEBP · máx 10 MB · máx 10 archivos';
+      input.value = '';
+    });
+}
+
+function viewAttachment(id) {
+  apiJson('/attachments/' + id + '/url')
+    .then(function(res) { window.open(res.url, '_blank', 'noopener'); })
+    .catch(function(err) { toast(err.message || 'Error al obtener URL', 'error'); });
+}
+
+function deleteAttachment(id, entityType, entityId) {
+  if (!confirm('¿Eliminar este archivo?')) return;
+  apiJson('/attachments/' + id, { method: 'DELETE' })
+    .then(function() {
+      toast('Archivo eliminado');
+      loadAttachmentList(entityType, entityId);
+    })
+    .catch(function(err) { toast(err.message || 'Error al eliminar', 'error'); });
+}
+
+function replaceAttachment(id, entityType, entityId) {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.pdf,.jpg,.jpeg,.png,.webp';
+  input.onchange = function() {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var listEl = document.getElementById('att-list');
+    if (listEl) listEl.innerHTML = '<div style="color:#94a3b8;font-size:13px">Reemplazando...</div>';
+    var fd = new FormData();
+    fd.append('file', file);
+    apiFormData('/attachments/' + id + '/replace', fd)
+      .then(function() {
+        toast('Archivo reemplazado');
+        loadAttachmentList(entityType, entityId);
+      })
+      .catch(function(err) { toast(err.message || 'Error al reemplazar', 'error'); });
+  };
+  input.click();
+}
+
 // Expose to global for onclick handlers
 window.navigate     = navigate;
 window.setAlertTab  = setAlertTab;
@@ -1980,3 +2108,8 @@ window.importCSVFile     = importCSVFile;
 window.exportBackup      = exportBackup;
 window.triggerImportBackup = triggerImportBackup;
 window.importBackup      = importBackup;
+window.showAttachmentsModal = showAttachmentsModal;
+window.attFileSelected   = attFileSelected;
+window.viewAttachment    = viewAttachment;
+window.deleteAttachment  = deleteAttachment;
+window.replaceAttachment = replaceAttachment;

@@ -10,6 +10,9 @@ async function bootstrap() {
     'JWT_ACCESS_SECRET',
     'JWT_REFRESH_SECRET',
     'FRONTEND_URL',
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'SUPABASE_STORAGE_BUCKET',
   ];
   const missing = required.filter((k) => !process.env[k]);
   if (missing.length > 0) {

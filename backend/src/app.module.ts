@@ -13,6 +13,7 @@ import { ExpirationsModule } from './expirations/expirations.module';
 import { HazardousDocumentsModule } from './hazardous-documents/hazardous-documents.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { CompaniesModule } from './companies/companies.module';
+import { AttachmentsModule } from './attachments/attachments.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -24,6 +25,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     AuthModule,
     UsersModule,
     CompaniesModule,
+    AttachmentsModule,
     VehiclesModule,
     DriversModule,
     ExpirationsModule,

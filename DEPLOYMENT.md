@@ -7,12 +7,21 @@ Backend: Render · Frontend: Netlify · Base de datos: Supabase (existente)
 ## Orden de despliegue
 
 ```
+0. Crear bucket privado en Supabase Storage (nombre: documents)
 1. Publicar backend en Render     → obtenés URL pública del backend
 2. Actualizar config.js           → reemplazar placeholder con URL de Render → commit → push
 3. Publicar frontend en Netlify   → obtenés URL pública del frontend
 4. Configurar FRONTEND_URL        → agregar URL de Netlify en Render → reiniciar backend
 5. Probar login desde Netlify
 ```
+
+### 0. Crear el bucket en Supabase Storage
+
+1. En Supabase → **Storage → New bucket**
+2. Nombre: `documents`
+3. **Public: OFF** — el bucket debe ser privado
+4. No configurar políticas RLS — el backend usa `service_role` que las bypasea
+5. Copiar la `service_role key` desde **Settings → API**
 
 ---
 
@@ -52,6 +61,9 @@ En la sección **Environment** de Render, agregar las siguientes variables. Nunc
 | `JWT_ACCESS_EXPIRES_IN` | `15m` |
 | `JWT_REFRESH_EXPIRES_IN` | `7d` |
 | `FRONTEND_URL` | URL de Netlify — la configurás **después** de publicar el frontend |
+| `SUPABASE_URL` | URL del proyecto Supabase (ej. `https://xxxx.supabase.co`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key de Supabase — **NUNCA en el frontend** |
+| `SUPABASE_STORAGE_BUCKET` | Nombre del bucket privado (ej. `documents`) |
 
 **Cómo generar los JWT secrets:**
 ```bash
@@ -241,6 +253,9 @@ Reemplazar `TU-BACKEND.onrender.com` con la URL real y hacer push.
 | `JWT_ACCESS_EXPIRES_IN` | `15m` |
 | `JWT_REFRESH_EXPIRES_IN` | `7d` |
 | `FRONTEND_URL` | `https://tu-sitio.netlify.app` |
+| `SUPABASE_URL` | `https://xxxx.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | service_role key (Settings → API en Supabase) |
+| `SUPABASE_STORAGE_BUCKET` | `documents` |
 
 ### Frontend (Netlify)
 No tiene variables de entorno. La URL del backend está en `config.js`.

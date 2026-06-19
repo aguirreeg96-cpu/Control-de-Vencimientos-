@@ -41,6 +41,7 @@ function buildPrisma() {
       update: jest.fn(),
       delete: jest.fn(),
     },
+    attachment: { count: jest.fn().mockResolvedValue(0) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
     $transaction: jest.fn(),
   } as unknown as PrismaService;

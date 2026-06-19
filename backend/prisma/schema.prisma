@@ -1,6 +1,5 @@
 // ============================================================
 //  LOGICONTROL PRO — Prisma Schema
-//  Etapa 2: Schema inicial de negocio (sin Users ni Auth)
 // ============================================================
 
 generator client {
@@ -28,6 +27,8 @@ enum AuditAction {
   UPDATE
   DELETE
   RENEW
+  UPLOAD  // adjunto cargado
+  REPLACE // adjunto reemplazado
 }
 
 /// Roles de usuario en el sistema
@@ -35,6 +36,14 @@ enum UserRole {
   SUPER_ADMIN // acceso total, configura la empresa
   COMPANY_ADMIN // administrador de una empresa
   USER // usuario operativo estándar
+}
+
+/// Tipo de entidad al que pertenece un adjunto
+enum AttachmentEntityType {
+  VEHICLE
+  DRIVER
+  EXPIRATION
+  HAZARDOUS_DOCUMENT
 }
 
 // ─── COMPANY ──────────────────────────────────────────────────
@@ -55,6 +64,7 @@ model Company {
   hazardousDocuments HazardousDocument[]
   auditLogs          AuditLog[]
   users              User[]
+  attachments        Attachment[]
 
   @@map("companies")
 }
@@ -197,6 +207,7 @@ model User {
 
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   refreshTokens RefreshToken[]
+  attachments   Attachment[]
 
   @@index([companyId])
   @@index([email])
@@ -249,4 +260,31 @@ model AuditLog {
   @@index([entityId])
   @@index([companyId, createdAt])
   @@map("audit_logs")
+}
+
+// ─── ATTACHMENT ───────────────────────────────────────────────
+
+/// Archivo adjunto a una entidad del sistema.
+/// Binario almacenado en Supabase Storage (bucket privado).
+/// Solo metadatos en PostgreSQL. storagePath es la ruta en el bucket.
+model Attachment {
+  id           String               @id @default(uuid())
+  companyId    String
+  entityType   AttachmentEntityType
+  entityId     String
+  originalName String
+  storagePath  String               @unique
+  mimeType     String
+  sizeBytes    Int
+  uploadedById String
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  uploadedBy User    @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@index([entityType, entityId])
+  @@index([uploadedById])
+  @@map("attachments")
 }

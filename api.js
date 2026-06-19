@@ -113,3 +113,46 @@ function apiJson(path, opts) {
     return res.json();
   });
 }
+
+// ─── FORM DATA HELPER (multipart) ────────────────────────────
+// Never sets Content-Type; browser adds multipart/form-data with boundary automatically.
+// Handles 401 + token refresh the same way apiJson does.
+function apiFormData(path, formData, opts) {
+  opts = opts || {};
+  var at = TokenStore.getAccess();
+  var headers = {};
+  if (at) headers['Authorization'] = 'Bearer ' + at;
+
+  var reqOpts = { method: opts.method || 'POST', headers: headers, body: formData };
+
+  function doRequest(authHeader) {
+    reqOpts.headers['Authorization'] = authHeader;
+    return fetch(API_BASE + path, reqOpts).then(function(res) {
+      if (res.status === 401 && !opts._retry) {
+        if (_isRefreshing) return Promise.reject(new Error('already_refreshing'));
+        _isRefreshing = true;
+        return tryRefresh().then(function(newToken) {
+          _isRefreshing = false;
+          return doRequest('Bearer ' + newToken);
+        }).catch(function(err) {
+          _isRefreshing = false;
+          if (_onSessionExpiredFn) _onSessionExpiredFn();
+          throw err;
+        });
+      }
+      if (!res.ok) {
+        return res.json().catch(function() { return {}; }).then(function(body) {
+          var msg = body.message;
+          if (Array.isArray(msg)) msg = msg.join('; ');
+          var err = new Error(msg || ('Error ' + res.status));
+          err.status = res.status;
+          err.body = body;
+          throw err;
+        });
+      }
+      return res.json();
+    });
+  }
+
+  return doRequest(at ? 'Bearer ' + at : '');
+}

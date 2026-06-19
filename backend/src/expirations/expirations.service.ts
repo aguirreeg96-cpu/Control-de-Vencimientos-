@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditAction, ExpirationCategory, Prisma } from '@prisma/client';
 import { createAuditLog } from '../common/helpers/audit.helper';
 import {
@@ -177,6 +177,13 @@ export class ExpirationsService {
     const existing = await this.prisma.expiration.findUnique({ where: { id } });
     if (!existing || existing.companyId !== user.companyId) {
       throw new NotFoundException('Vencimiento no encontrado');
+    }
+
+    const attachmentCount = await this.prisma.attachment.count({
+      where: { entityType: 'EXPIRATION', entityId: id },
+    });
+    if (attachmentCount > 0) {
+      throw new ConflictException('No se puede eliminar el vencimiento porque tiene archivos adjuntos. Eliminá los adjuntos primero.');
     }
 
     return this.prisma.$transaction(async (tx) => {

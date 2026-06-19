@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditAction, Prisma } from '@prisma/client';
 import { createAuditLog } from '../common/helpers/audit.helper';
 import { computeExpirationStatus } from '../common/utils/expiration-status.util';
@@ -134,6 +134,13 @@ export class HazardousDocumentsService {
   async remove(id: string, user: JwtPayload) {
     const existing = await this.prisma.hazardousDocument.findUnique({ where: { id } });
     if (!existing || existing.companyId !== user.companyId) throw new NotFoundException('Documento no encontrado');
+
+    const attachmentCount = await this.prisma.attachment.count({
+      where: { entityType: 'HAZARDOUS_DOCUMENT', entityId: id },
+    });
+    if (attachmentCount > 0) {
+      throw new ConflictException('No se puede eliminar el documento porque tiene archivos adjuntos. Eliminá los adjuntos primero.');
+    }
 
     return this.prisma.$transaction(async (tx) => {
       await tx.hazardousDocument.delete({ where: { id } });
