@@ -1578,6 +1578,7 @@ function renderAdmin() {
   var tabs = [];
   if (isSA) tabs.push({ id: 'companies', label: 'Empresas' });
   if (isSA || isCA) tabs.push({ id: 'users', label: 'Usuarios' });
+  if (isSA || isCA) tabs.push({ id: 'backups', label: 'Respaldos' });
   tabs.push({ id: 'password', label: 'Mi Contraseña' });
 
   var validTabs = tabs.map(function(t){ return t.id; });
@@ -1590,6 +1591,7 @@ function renderAdmin() {
   var body = '';
   if (App.adminTab === 'companies') body = renderAdminCompanies();
   else if (App.adminTab === 'users') body = renderAdminUsers();
+  else if (App.adminTab === 'backups') body = renderAdminBackups();
   else body = renderAdminPassword();
 
   el.innerHTML =
@@ -1657,6 +1659,176 @@ function renderAdminPassword() {
     '<p id="adm-pwd-error" style="color:#ef4444;font-size:13px;min-height:18px"></p>'+
     '<button class="btn-primary" onclick="adminChangePassword()">Cambiar contraseña</button>'+
     '</div>';
+}
+
+function renderAdminBackups() {
+  var user = UserStore ? UserStore.get() : null;
+  var isSA = user && user.role === 'SUPER_ADMIN';
+
+  var companyField = isSA
+    ? '<div class="form-group" style="max-width:340px"><label style="font-size:12px;color:#94a3b8">ID de empresa (vacío = la tuya)</label>'+
+      '<input id="srv-bk-companyId" class="form-control" placeholder="Dejar vacío para tu empresa"></div>'
+    : '';
+
+  var restoreSection = isSA
+    ? '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin-top:20px">'+
+      '<h4 style="font-size:14px;font-weight:600;color:#f1f5f9;margin:0 0 8px">Restaurar desde respaldo</h4>'+
+      '<p style="font-size:12px;color:#94a3b8;margin:0 0 14px">Solo SUPER_ADMIN. Restaura vehículos, choferes, vencimientos y documentos. Los usuarios no se restauran automáticamente. Los registros existentes (por ID) no se sobreescriben.</p>'+
+      '<div class="form-group" style="max-width:340px"><label style="font-size:12px;color:#94a3b8">Archivo de respaldo (.json)</label>'+
+      '<input type="file" id="srv-bk-restore-file" accept=".json" class="form-control" style="padding:6px 10px"></div>'+
+      '<div class="form-group" style="max-width:340px"><label style="font-size:12px;color:#ef4444">Confirmación — escribí exactamente: RESTORE</label>'+
+      '<input id="srv-bk-confirm" class="form-control" placeholder="RESTORE" autocomplete="off" spellcheck="false"></div>'+
+      '<p id="srv-bk-restore-msg" style="font-size:13px;min-height:18px;margin-bottom:10px"></p>'+
+      '<button class="btn-primary" style="background:#dc2626" onclick="adminRestoreServerBackup()">Restaurar base de datos</button>'+
+      '</div>'
+    : '';
+
+  return '<div style="max-width:640px">'+
+    '<h3 style="font-size:16px;font-weight:600;color:#f1f5f9;margin:0 0 4px">Respaldos del sistema</h3>'+
+    '<p style="font-size:13px;color:#94a3b8;margin:0 0 20px">Exportá, validá y restaurá datos operativos de la base de datos.</p>'+
+
+    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin-bottom:16px">'+
+    '<h4 style="font-size:14px;font-weight:600;color:#f1f5f9;margin:0 0 8px">Exportar respaldo</h4>'+
+    '<p style="font-size:12px;color:#94a3b8;margin:0 0 14px">Descarga un archivo JSON con vehículos, choferes, vencimientos, documentos de residuos peligrosos y metadatos de adjuntos. No incluye contraseñas, tokens ni archivos binarios.</p>'+
+    companyField+
+    '<button class="btn-primary" onclick="adminExportServerBackup()">'+
+    '<svg width="15" height="15" viewBox="0 0 15 15" fill="none" style="vertical-align:-2px;margin-right:5px"><path d="M2 9v4h11V9M7.5 1.5V9M5 7l2.5 2.5L10 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'+
+    'Descargar respaldo</button>'+
+    '</div>'+
+
+    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin-bottom:4px">'+
+    '<h4 style="font-size:14px;font-weight:600;color:#f1f5f9;margin:0 0 8px">Validar respaldo</h4>'+
+    '<p style="font-size:12px;color:#94a3b8;margin:0 0 14px">Verificá que un archivo de respaldo sea compatible antes de restaurar.</p>'+
+    '<div class="form-group" style="max-width:340px"><label style="font-size:12px;color:#94a3b8">Archivo de respaldo (.json)</label>'+
+    '<input type="file" id="srv-bk-validate-file" accept=".json" class="form-control" style="padding:6px 10px"></div>'+
+    '<p id="srv-bk-validate-msg" style="font-size:13px;min-height:18px;margin-bottom:10px"></p>'+
+    '<button class="btn-ghost" onclick="adminValidateServerBackup()">Validar archivo</button>'+
+    '</div>'+
+
+    restoreSection+
+    '</div>';
+}
+
+function adminExportServerBackup() {
+  var user = UserStore ? UserStore.get() : null;
+  var companyIdInput = document.getElementById('srv-bk-companyId');
+  var companyId = companyIdInput ? (companyIdInput.value || '').trim() : '';
+  var at = TokenStore.getAccess();
+  var url = API_BASE + '/backups/export' + (companyId ? '?companyId=' + encodeURIComponent(companyId) : '');
+
+  fetch(url, {
+    method: 'GET',
+    headers: at ? { 'Authorization': 'Bearer ' + at } : {}
+  })
+  .then(function(res) {
+    if (!res.ok) {
+      return res.json().catch(function(){ return {}; }).then(function(body) {
+        throw new Error(body.message || 'Error al exportar');
+      });
+    }
+    var disp = res.headers.get('Content-Disposition') || '';
+    var match = disp.match(/filename="([^"]+)"/);
+    var filename = match ? match[1] : ('backup-' + toISO(today0()) + '.json');
+    return res.blob().then(function(blob) {
+      var burl = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = burl; a.download = filename;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(burl);
+      toast('Respaldo exportado');
+    });
+  })
+  .catch(function(e) { toast(e.message || 'Error al exportar', 'error'); });
+}
+
+function adminValidateServerBackup() {
+  var input = document.getElementById('srv-bk-validate-file');
+  var msg = document.getElementById('srv-bk-validate-msg');
+  if (!input || !input.files[0]) {
+    if (msg) { msg.style.color = '#f87171'; msg.textContent = 'Seleccioná un archivo primero.'; }
+    return;
+  }
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var backup;
+    try { backup = JSON.parse(ev.target.result); } catch(e) {
+      if (msg) { msg.style.color = '#f87171'; msg.textContent = 'El archivo no es JSON válido.'; }
+      return;
+    }
+    apiJson('/backups/validate', { method: 'POST', body: JSON.stringify({ backup: backup }) })
+    .then(function(result) {
+      if (msg) {
+        if (result.valid) {
+          var s = result.summary || {};
+          msg.style.color = '#4ade80';
+          msg.textContent = 'Válido — ' +
+            (s.vehicles||0) + ' vehículos, ' +
+            (s.drivers||0) + ' choferes, ' +
+            (s.expirations||0) + ' vencimientos, ' +
+            (s.hazardousDocuments||0) + ' doc. peligrosos.';
+        } else {
+          msg.style.color = '#f87171';
+          msg.textContent = 'Inválido: ' + ((result.errors || []).join('; ') || 'formato incorrecto');
+        }
+      }
+    })
+    .catch(function(e) {
+      if (msg) { msg.style.color = '#f87171'; msg.textContent = e.message || 'Error al validar.'; }
+    });
+  };
+  reader.onerror = function() {
+    if (msg) { msg.style.color = '#f87171'; msg.textContent = 'Error al leer el archivo.'; }
+  };
+  reader.readAsText(input.files[0], 'UTF-8');
+}
+
+function adminRestoreServerBackup() {
+  var fileInput  = document.getElementById('srv-bk-restore-file');
+  var confirmInp = document.getElementById('srv-bk-confirm');
+  var msg        = document.getElementById('srv-bk-restore-msg');
+
+  if (!fileInput || !fileInput.files[0]) {
+    if (msg) { msg.style.color = '#f87171'; msg.textContent = 'Seleccioná un archivo de respaldo.'; }
+    return;
+  }
+  var confirmation = (confirmInp ? confirmInp.value : '').trim();
+  if (confirmation !== 'RESTORE') {
+    if (msg) { msg.style.color = '#f87171'; msg.textContent = 'Escribí RESTORE en el campo de confirmación.'; }
+    return;
+  }
+
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var backup;
+    try { backup = JSON.parse(ev.target.result); } catch(e) {
+      if (msg) { msg.style.color = '#f87171'; msg.textContent = 'El archivo no es JSON válido.'; }
+      return;
+    }
+    if (msg) { msg.style.color = '#94a3b8'; msg.textContent = 'Restaurando...'; }
+    apiJson('/backups/restore', { method: 'POST', body: JSON.stringify({ backup: backup, confirmation: 'RESTORE' }) })
+    .then(function(report) {
+      var c = report.created || {};
+      if (msg) {
+        msg.style.color = '#4ade80';
+        msg.textContent = 'Restaurado: ' +
+          (c.vehicles||0) + ' vehículos, ' +
+          (c.drivers||0) + ' choferes, ' +
+          (c.expirations||0) + ' vencimientos, ' +
+          (c.hazardousDocuments||0) + ' doc. peligrosos creados.';
+      }
+      toast('Restauración completada');
+      return loadApiData();
+    })
+    .then(function() { renderView(App.view); })
+    .catch(function(e) {
+      if (msg) { msg.style.color = '#f87171'; msg.textContent = e.message || 'Error en la restauración.'; }
+    });
+  };
+  reader.onerror = function() {
+    if (msg) { msg.style.color = '#f87171'; msg.textContent = 'Error al leer el archivo.'; }
+  };
+  reader.readAsText(fileInput.files[0], 'UTF-8');
 }
 
 function addCompany() {
@@ -2113,3 +2285,9 @@ window.attFileSelected   = attFileSelected;
 window.viewAttachment    = viewAttachment;
 window.deleteAttachment  = deleteAttachment;
 window.replaceAttachment = replaceAttachment;
+window.adminExportServerBackup  = adminExportServerBackup;
+window.adminValidateServerBackup = adminValidateServerBackup;
+window.adminRestoreServerBackup  = adminRestoreServerBackup;
+window.showForgotPasswordModal   = showForgotPasswordModal;
+window.closeForgotPasswordModal  = closeForgotPasswordModal;
+window.submitForgotPassword      = submitForgotPassword;

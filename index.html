@@ -241,7 +241,24 @@
       </div>
       <p id="login-error" class="login-error" aria-live="polite"></p>
       <button type="submit" class="btn-login">Iniciar sesión</button>
+      <div style="text-align:center;margin-top:12px">
+        <a href="#" id="forgot-pwd-link" onclick="showForgotPasswordModal();return false;" style="font-size:13px;color:#60a5fa;text-decoration:none">¿Olvidaste tu contraseña?</a>
+      </div>
     </form>
+  </div>
+</div>
+
+<div id="forgot-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1100;display:none;align-items:center;justify-content:center" role="dialog" aria-modal="true" aria-labelledby="forgot-title">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:28px 28px 24px;width:100%;max-width:380px;position:relative">
+    <h3 id="forgot-title" style="font-size:16px;font-weight:600;margin:0 0 6px;color:#f1f5f9">Recuperar contraseña</h3>
+    <p style="font-size:13px;color:#94a3b8;margin:0 0 18px">Ingresá tu correo y recibirás un enlace para restablecer tu contraseña.</p>
+    <input type="email" id="forgot-email" placeholder="usuario@empresa.com" autocomplete="email"
+      style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:14px;padding:10px 12px;outline:none;margin-bottom:12px">
+    <p id="forgot-msg" style="font-size:13px;min-height:18px;margin-bottom:10px"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="closeForgotPasswordModal()" style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;padding:8px 16px;cursor:pointer">Cancelar</button>
+      <button id="forgot-btn" onclick="submitForgotPassword()" style="background:#3b82f6;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;padding:8px 16px;cursor:pointer">Enviar enlace</button>
+    </div>
   </div>
 </div>
 

@@ -32,3 +32,20 @@ services:
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
         sync: false
+      # Correo electrónico — recuperación de contraseña (opcional pero recomendado)
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_SECURE
+        value: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: MAIL_FROM_NAME
+        value: LOGICONTROL PRO
+      - key: APP_FRONTEND_URL
+        sync: false

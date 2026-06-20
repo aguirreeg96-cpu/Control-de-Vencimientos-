@@ -27,8 +27,13 @@ enum AuditAction {
   UPDATE
   DELETE
   RENEW
-  UPLOAD  // adjunto cargado
-  REPLACE // adjunto reemplazado
+  UPLOAD                    // adjunto cargado
+  REPLACE                   // adjunto reemplazado
+  PASSWORD_RESET_REQUESTED  // solicitud de recuperación de contraseña
+  PASSWORD_RESET_COMPLETED  // contraseña restablecida exitosamente
+  BACKUP_EXPORT             // respaldo exportado
+  BACKUP_VALIDATE           // respaldo validado
+  BACKUP_RESTORE            // restauración ejecutada
 }
 
 /// Roles de usuario en el sistema
@@ -205,9 +210,10 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  refreshTokens RefreshToken[]
-  attachments   Attachment[]
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  attachments         Attachment[]
 
   @@index([companyId])
   @@index([email])
@@ -235,6 +241,28 @@ model RefreshToken {
   @@index([expiresAt])
   @@index([revokedAt])
   @@map("refresh_tokens")
+}
+
+// ─── PASSWORD RESET TOKEN ─────────────────────────────────────
+
+/// Token de recuperación de contraseña de un solo uso.
+/// Solo el hash SHA-256 se almacena, nunca el token original.
+/// Expira en 30 minutos y queda invalidado al usarse.
+model PasswordResetToken {
+  id                 String    @id @default(uuid())
+  userId             String
+  tokenHash          String    @unique
+  expiresAt          DateTime
+  usedAt             DateTime?
+  createdAt          DateTime  @default(now())
+  requestedIp        String?
+  requestedUserAgent String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 // ─── AUDIT LOG ────────────────────────────────────────────────

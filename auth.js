@@ -151,6 +151,61 @@ function initLoginForm() {
   });
 }
 
+// ─── FORGOT PASSWORD ─────────────────────────────────────────
+function showForgotPasswordModal() {
+  var el = document.getElementById('forgot-overlay');
+  if (!el) return;
+  el.style.display = 'flex';
+  var inp = document.getElementById('forgot-email');
+  var msg = document.getElementById('forgot-msg');
+  var btn = document.getElementById('forgot-btn');
+  if (inp) { inp.value = ''; inp.disabled = false; }
+  if (msg) { msg.textContent = ''; msg.style.color = ''; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Enviar enlace'; }
+  if (inp) inp.focus();
+}
+
+function closeForgotPasswordModal() {
+  var el = document.getElementById('forgot-overlay');
+  if (el) el.style.display = 'none';
+}
+
+function submitForgotPassword() {
+  var inp = document.getElementById('forgot-email');
+  var msg = document.getElementById('forgot-msg');
+  var btn = document.getElementById('forgot-btn');
+  var email = (inp ? inp.value : '').trim();
+
+  if (!email) {
+    if (msg) { msg.textContent = 'Ingresá tu correo electrónico.'; msg.style.color = '#f87171'; }
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+  if (inp) inp.disabled = true;
+  if (msg) { msg.textContent = ''; msg.style.color = ''; }
+
+  fetch(API_BASE + '/auth/forgot-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email })
+  })
+  .then(function() {
+    if (msg) {
+      msg.textContent = 'Si el correo está registrado, recibirás un enlace para restablecer tu contraseña.';
+      msg.style.color = '#4ade80';
+    }
+    if (btn) { btn.disabled = true; }
+  })
+  .catch(function() {
+    if (msg) {
+      msg.textContent = 'Si el correo está registrado, recibirás un enlace para restablecer tu contraseña.';
+      msg.style.color = '#4ade80';
+    }
+    if (btn) { btn.disabled = true; }
+  });
+}
+
 // ─── SESSION EXPIRED HOOK ────────────────────────────────────
 onSessionExpiredCallback(function() {
   TokenStore.clear();
